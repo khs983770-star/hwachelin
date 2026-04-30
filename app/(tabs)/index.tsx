@@ -19,6 +19,7 @@ import ToiletBottomSheet from '../../components/ToiletBottomSheet';
 import { RootStackParamList } from '../../types/navigation';
 import KakaoMapView, { KakaoMapViewRef } from '../../components/KakaoMapView';
 import { colors } from '../../constants/theme';
+import { setGoldContextSnapshot } from '../../lib/goldContext';
 
 const DEFAULT_LAT = 37.5665;
 const DEFAULT_LNG = 126.978;
@@ -91,7 +92,16 @@ export default function MapScreen() {
         : `${isShowingDemoData ? '데모 ' : ''}화장실 ${filteredToilets.length}개`
       : hasActiveSearchOrFilter
         ? '조건에 맞는 화장실 없음'
-        : '주변 화장실 없음';
+      : '주변 화장실 없음';
+
+  useEffect(() => {
+    setGoldContextSnapshot({
+      center: mapCenter,
+      toilets: filteredToilets,
+      searchQuery,
+      selectedFilter,
+    });
+  }, [filteredToilets, mapCenter, searchQuery, selectedFilter]);
 
   // 현재 지도 중심 기준으로 화장실 조회
   const fetchToilets = useCallback(async (lat: number, lng: number) => {
@@ -182,6 +192,7 @@ export default function MapScreen() {
       kakaoMapRef.current?.moveTo(location.lat, location.lng);
     }
 
+    setMapCenter(location);
     fetchToilets(location.lat, location.lng);
   };
 
