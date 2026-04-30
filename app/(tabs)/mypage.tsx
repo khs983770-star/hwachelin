@@ -17,6 +17,26 @@ import { signInWithKakao, signOut } from '../../lib/authService';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../types/navigation';
 
+type MyReviewItem = {
+  id: string;
+  toilet_id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+  placeName: string;
+  address: string;
+};
+
+type MyReportItem = {
+  id: string;
+  toilet_id: string | null;
+  report_type: 'new_toilet' | 'correction';
+  place_name: string;
+  address: string | null;
+  status: 'pending' | 'reviewing' | 'approved' | 'rejected';
+  created_at: string;
+};
+
 export default function MyPage() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -24,14 +44,55 @@ export default function MyPage() {
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
+  const [reportCount, setReportCount] = useState(0);
+  const [myReviews, setMyReviews] = useState<MyReviewItem[]>([]);
+  const [myReports, setMyReports] = useState<MyReportItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
 
-  const loadReviewCount = useCallback(async (userId: string) => {
-    const { count, error } = await supabase
-      .from('reviews')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId);
+  const loadMyActivity = useCallback(async (userId: string) => {
+    setActivityLoading(true);
+    const [reviewCountRes, reviewListRes, reportCountRes, reportListRes] = await Promise.all([
+      supabase
+        .from('reviews')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId),
+      supabase
+        .from('reviews')
+        .select(`
+          id,
+          toilet_id,
+          rating,
+          comment,
+          created_at,
+          toilets (
+            id,
+            places (
+              name,
+              address
+            )
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(5),
+      supabase
+        .from('reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId),
+      supabase
+        .from('reports')
+        .select('id, toilet_id, report_type, place_name, address, status, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(5),
+    ]);
 
-    if (!error) setReviewCount(count ?? 0);
+    setActivityLoading(false);
+
+    if (!reviewCountRes.error) setReviewCount(reviewCountRes.count ?? 0);
+    if (!reportCountRes.error) setReportCount(reportCountRes.count ?? 0);
+    if (!reviewListRes.error) setMyReviews(normalizeReviews(reviewListRes.data ?? []));
+    if (!reportListRes.error) setMyReports((reportListRes.data ?? []) as MyReportItem[]);
   }, []);
 
   useEffect(() => {
@@ -40,7 +101,7 @@ export default function MyPage() {
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setSession(data.session);
-      if (data.session?.user.id) loadReviewCount(data.session.user.id);
+      if (data.session?.user.id) loadMyActivity(data.session.user.id);
       setLoading(false);
     });
 
@@ -49,9 +110,12 @@ export default function MyPage() {
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       if (nextSession?.user.id) {
-        loadReviewCount(nextSession.user.id);
+        loadMyActivity(nextSession.user.id);
       } else {
         setReviewCount(0);
+        setReportCount(0);
+        setMyReviews([]);
+        setMyReports([]);
       }
     });
 
@@ -59,7 +123,7 @@ export default function MyPage() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [loadReviewCount]);
+  }, [loadMyActivity]);
 
   useFocusEffect(
     useCallback(() => {
@@ -70,16 +134,19 @@ export default function MyPage() {
         if (!active) return;
         setSession(data.session);
         if (data.session?.user.id) {
-          await loadReviewCount(data.session.user.id);
+          await loadMyActivity(data.session.user.id);
         } else {
           setReviewCount(0);
+          setReportCount(0);
+          setMyReviews([]);
+          setMyReports([]);
         }
       })();
 
       return () => {
         active = false;
       };
-    }, [loadReviewCount])
+    }, [loadMyActivity])
   );
 
   const login = async () => {
@@ -142,8 +209,76 @@ export default function MyPage() {
 
       <View style={styles.stats}>
         <StatCard value={String(reviewCount)} label="작성 리뷰" />
-        <StatCard value="3" label="저장 장소" />
+        <StatCard value={String(reportCount)} label="접수 제보" />
       </View>
+
+      {user && (
+        <>
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>내 리뷰</Text>
+              {activityLoading && <ActivityIndicator size="small" color={colors.orange} />}
+            </View>
+            {myReviews.length === 0 ? (
+              <Text style={styles.emptyText}>아직 작성한 리뷰가 없어요.</Text>
+            ) : (
+              myReviews.map((review) => (
+                <TouchableOpacity
+                  key={review.id}
+                  style={styles.activityCard}
+                  onPress={() => navigation.navigate('ToiletDetail', { toiletId: review.toilet_id })}
+                  activeOpacity={0.82}
+                >
+                  <View style={styles.activityHeader}>
+                    <Text style={styles.activityTitle} numberOfLines={1}>
+                      {review.placeName}
+                    </Text>
+                    <Text style={styles.activityScore}>★ {Number(review.rating).toFixed(1)}</Text>
+                  </View>
+                  <Text style={styles.activitySub} numberOfLines={1}>
+                    {review.comment || review.address || '리뷰 메모 없음'}
+                  </Text>
+                  <Text style={styles.activityDate}>{formatDate(review.created_at)}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>내 제보</Text>
+            {myReports.length === 0 ? (
+              <Text style={styles.emptyText}>아직 접수한 제보가 없어요.</Text>
+            ) : (
+              myReports.map((report) => (
+                <TouchableOpacity
+                  key={report.id}
+                  style={styles.activityCard}
+                  onPress={() =>
+                    report.toilet_id
+                      ? navigation.navigate('ToiletDetail', { toiletId: report.toilet_id })
+                      : undefined
+                  }
+                  activeOpacity={report.toilet_id ? 0.82 : 1}
+                >
+                  <View style={styles.activityHeader}>
+                    <Text style={styles.activityTitle} numberOfLines={1}>
+                      {report.place_name}
+                    </Text>
+                    <Text style={[styles.statusBadge, getStatusStyle(report.status)]}>
+                      {getStatusLabel(report.status)}
+                    </Text>
+                  </View>
+                  <Text style={styles.activitySub} numberOfLines={1}>
+                    {report.report_type === 'new_toilet' ? '신규 제보' : '수정 제보'} ·{' '}
+                    {report.address || '주소 정보 없음'}
+                  </Text>
+                  <Text style={styles.activityDate}>{formatDate(report.created_at)}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </>
+      )}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>내 활동</Text>
@@ -158,6 +293,44 @@ export default function MyPage() {
       </View>
     </ScrollView>
   );
+}
+
+function normalizeReviews(rows: any[]): MyReviewItem[] {
+  return rows.map((row) => {
+    const toilet = Array.isArray(row.toilets) ? row.toilets[0] : row.toilets;
+    const place = Array.isArray(toilet?.places) ? toilet.places[0] : toilet?.places;
+
+    return {
+      id: row.id,
+      toilet_id: row.toilet_id,
+      rating: Number(row.rating),
+      comment: row.comment,
+      created_at: row.created_at,
+      placeName: place?.name ?? '화장실',
+      address: place?.address ?? '',
+    };
+  });
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function getStatusLabel(status: MyReportItem['status']) {
+  if (status === 'reviewing') return '검토중';
+  if (status === 'approved') return '승인';
+  if (status === 'rejected') return '반려';
+  return '대기';
+}
+
+function getStatusStyle(status: MyReportItem['status']) {
+  if (status === 'approved') return styles.statusApproved;
+  if (status === 'rejected') return styles.statusRejected;
+  if (status === 'reviewing') return styles.statusReviewing;
+  return styles.statusPending;
 }
 
 function StatCard({ value, label }: { value: string; label: string }) {
@@ -268,6 +441,13 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 22, color: colors.orange, fontWeight: '700' },
   statLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
   section: { marginTop: 14 },
+  sectionHeader: {
+    minHeight: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',
@@ -275,6 +455,46 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: 0.3,
   },
+  emptyText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 10,
+    padding: 12,
+  },
+  activityCard: {
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderTertiary,
+    backgroundColor: colors.backgroundSecondary,
+    padding: 12,
+    marginBottom: 8,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 5,
+  },
+  activityTitle: { flex: 1, fontSize: 14, color: colors.textPrimary, fontWeight: '700' },
+  activityScore: { fontSize: 12, color: colors.amber, fontWeight: '700' },
+  activitySub: { fontSize: 12, color: colors.textSecondary },
+  activityDate: { fontSize: 11, color: colors.textTertiary, marginTop: 6 },
+  statusBadge: {
+    minWidth: 44,
+    textAlign: 'center',
+    overflow: 'hidden',
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statusPending: { color: '#92400E', backgroundColor: '#FEF3C7' },
+  statusReviewing: { color: colors.blue, backgroundColor: '#DBEAFE' },
+  statusApproved: { color: colors.green, backgroundColor: '#D1FAE5' },
+  statusRejected: { color: '#D24134', backgroundColor: '#FEE2E2' },
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
