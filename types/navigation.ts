@@ -17,4 +17,12 @@ export type RootStackParamList = {
     toiletLat?: number;
     toiletLng?: number;
   };
+  Report: {
+    toiletId?: string;
+    placeName?: string;
+    address?: string;
+    lat?: number;
+    lng?: number;
+    reportType?: 'new_toilet' | 'correction';
+  };
 };

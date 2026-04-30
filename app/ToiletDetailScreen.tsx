@@ -177,6 +177,23 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
         <Text style={styles.primaryButtonText}>리뷰 작성하기</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.secondaryButton}
+        onPress={() =>
+          navigation.navigate('Report', {
+            toiletId,
+            placeName: place?.name ?? '화장실',
+            address: place?.address,
+            lat: place?.lat,
+            lng: place?.lng,
+            reportType: 'correction',
+          })
+        }
+        activeOpacity={0.85}
+      >
+        <Text style={styles.secondaryButtonText}>정보 수정 제보</Text>
+      </TouchableOpacity>
+
       {reviews.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>리뷰</Text>
@@ -345,9 +362,19 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     alignItems: 'center',
     marginTop: 4,
-    marginBottom: 14,
   },
   primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  secondaryButton: {
+    borderRadius: 11,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 14,
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSecondary,
+  },
+  secondaryButtonText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700' },
   reviewCard: {
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,

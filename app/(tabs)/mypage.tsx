@@ -8,15 +8,18 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Session } from '@supabase/supabase-js';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../constants/theme';
 import { signInWithKakao, signOut } from '../../lib/authService';
 import { supabase } from '../../lib/supabase';
+import { RootStackParamList } from '../../types/navigation';
 
 export default function MyPage() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
@@ -146,7 +149,12 @@ export default function MyPage() {
         <Text style={styles.sectionTitle}>내 활동</Text>
         <MenuRow icon="★" title="내가 평가한 화장실" subtitle="별점과 체크리스트" />
         <MenuRow icon="📍" title="저장한 장소" subtitle="다시 가기 좋은 곳" />
-        <MenuRow icon="!" title="제보 내역" subtitle="수정 요청과 신규 등록" />
+        <MenuRow
+          icon="!"
+          title="화장실 제보하기"
+          subtitle="신규 등록과 정보 수정 요청"
+          onPress={() => navigation.navigate('Report', { reportType: 'new_toilet' })}
+        />
       </View>
     </ScrollView>
   );
@@ -161,9 +169,19 @@ function StatCard({ value, label }: { value: string; label: string }) {
   );
 }
 
-function MenuRow({ icon, title, subtitle }: { icon: string; title: string; subtitle: string }) {
+function MenuRow({
+  icon,
+  title,
+  subtitle,
+  onPress,
+}: {
+  icon: string;
+  title: string;
+  subtitle: string;
+  onPress?: () => void;
+}) {
   return (
-    <View style={styles.menuRow}>
+    <TouchableOpacity style={styles.menuRow} onPress={onPress} activeOpacity={onPress ? 0.8 : 1}>
       <View style={styles.menuIcon}>
         <Text style={styles.menuIconText}>{icon}</Text>
       </View>
@@ -172,7 +190,7 @@ function MenuRow({ icon, title, subtitle }: { icon: string; title: string; subti
         <Text style={styles.menuSubtitle}>{subtitle}</Text>
       </View>
       <Text style={styles.menuArrow}>›</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 

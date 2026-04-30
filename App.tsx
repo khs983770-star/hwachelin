@@ -8,6 +8,7 @@ import MyPageScreen from './app/(tabs)/mypage';
 import GoldScreen from './app/(tabs)/gold';
 import ToiletDetailScreen from './app/ToiletDetailScreen';
 import ReviewWriteScreen from './app/ReviewWriteScreen';
+import ReportScreen from './app/ReportScreen';
 import { RootStackParamList } from './types/navigation';
 import { colors } from './constants/theme';
 
@@ -80,6 +81,11 @@ export default function App() {
             name="ReviewWrite"
             component={ReviewWriteScreen}
             options={{ title: '리뷰 작성' }}
+          />
+          <Stack.Screen
+            name="Report"
+            component={ReportScreen}
+            options={{ title: '화장실 제보' }}
           />
         </Stack.Navigator>
       </NavigationContainer>
