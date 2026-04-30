@@ -510,7 +510,7 @@ npm run demo:cityhall -- --count=1000
 - `npm run public-toilets:sync:mcp` 수동 1회 실행 성공
 - `npx tsc --noEmit` 통과
 
-### 5순위: 카카오 로그인 - 실제 로그인 성공, 리뷰 저장 연결 검증 단계
+### 5순위: 카카오 로그인 - 실제 로그인 및 리뷰 저장 연결 검증 완료
 
 리뷰 저장과 제보 기능을 제대로 하려면 로그인 필요.
 
@@ -556,7 +556,11 @@ npm run demo:cityhall -- --count=1000
 - `lib/supabase.ts`에 `flowType: 'pkce'` 설정
 - 사용자가 시뮬레이터에서 카카오 계정 실제 로그인 성공 확인
 - 시뮬레이터 앱 재실행 후 런타임 오류 없이 지도 화면 렌더링 확인
-- 남은 검증: 로그인된 상태에서 리뷰 작성 → DB `reviews` row 생성 확인
+- 로그인된 시뮬레이터 세션으로 Supabase RLS `reviews_insert` 검증 완료
+  - 사용자 세션 기반 `reviews` insert 성공
+  - insert된 row 재조회 성공
+  - 검증용 리뷰 row 삭제 정리 완료
+- 남은 작업: 앱 UI에서 실제 사용자가 리뷰를 작성했을 때 상세 화면과 마이페이지 카운트가 기대대로 갱신되는지 수동 QA
 
 ### 6순위: 화장실 제보 화면
 
