@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { getToiletDetail } from '../lib/toiletService';
 import { RootStackParamList } from '../types/navigation';
@@ -29,13 +30,23 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
     setDetail(data);
   }, [toiletId]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await loadDetail();
-      setLoading(false);
-    })();
-  }, [loadDetail]);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      (async () => {
+        setLoading(true);
+        const data = await getToiletDetail(toiletId);
+        if (!active) return;
+        setDetail(data);
+        setLoading(false);
+      })();
+
+      return () => {
+        active = false;
+      };
+    }, [toiletId])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);

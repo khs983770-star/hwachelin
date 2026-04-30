@@ -103,6 +103,7 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
               onPress: async () => {
                 const loginResult = await signInWithKakao();
                 if (!loginResult.ok) Alert.alert('로그인 실패', loginResult.message);
+                else submit();
               },
             },
           ]

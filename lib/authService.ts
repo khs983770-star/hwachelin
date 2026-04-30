@@ -15,11 +15,12 @@ export function getAuthRedirectUrl() {
 
 export async function signInWithKakao(): Promise<AuthResult> {
   const redirectTo = getAuthRedirectUrl();
+  const kakaoScopes = 'profile_nickname profile_image';
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'kakao',
     options: {
       redirectTo,
-      scopes: 'profile_nickname profile_image',
+      scopes: kakaoScopes,
       skipBrowserRedirect: true,
     },
   });
@@ -28,7 +29,10 @@ export async function signInWithKakao(): Promise<AuthResult> {
   if (!data.url) return { ok: false, message: '카카오 로그인 URL을 만들지 못했어요.' };
 
   const authUrl = new URL(data.url);
-  authUrl.searchParams.set('scope', 'profile_nickname profile_image');
+  // Supabase's Kakao provider maps `scopes` to Kakao's default email scope on
+  // some flows. Keep only Kakao's native `scope` query to avoid asking for email.
+  authUrl.searchParams.delete('scopes');
+  authUrl.searchParams.set('scope', kakaoScopes);
 
   const result = await WebBrowser.openAuthSessionAsync(authUrl.toString(), redirectTo);
   if (result.type !== 'success') {
@@ -36,20 +40,49 @@ export async function signInWithKakao(): Promise<AuthResult> {
   }
 
   const queryParams = parseQueryParams(result.url);
+  console.log('[auth] callback url:', sanitizeAuthUrl(result.url));
+  console.log('[auth] callback params:', Object.keys(queryParams));
   const errorDescription = stringParam(queryParams.error_description ?? queryParams.error);
   if (errorDescription) return { ok: false, message: decodeURIComponent(errorDescription) };
 
   const code = stringParam(queryParams.code);
-  if (!code) return { ok: false, message: '로그인 인증 코드를 받지 못했어요.' };
+  if (code) {
+    const { data: sessionData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(
+      code
+    );
+    if (exchangeError) return { ok: false, message: exchangeError.message };
+    if (!sessionData.session) return { ok: false, message: '로그인 세션을 만들지 못했어요.' };
 
-  const { data: sessionData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(
-    code
-  );
-  if (exchangeError) return { ok: false, message: exchangeError.message };
-  if (!sessionData.session) return { ok: false, message: '로그인 세션을 만들지 못했어요.' };
+    await ensureUserProfile(sessionData.session.user);
+    return { ok: true, session: sessionData.session };
+  }
 
-  await ensureUserProfile(sessionData.session.user);
-  return { ok: true, session: sessionData.session };
+  const accessToken = stringParam(queryParams.access_token);
+  const refreshToken = stringParam(queryParams.refresh_token);
+  if (accessToken && refreshToken) {
+    const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (sessionError) return { ok: false, message: sessionError.message };
+    if (!sessionData.session) return { ok: false, message: '로그인 세션을 만들지 못했어요.' };
+
+    await ensureUserProfile(sessionData.session.user);
+    return { ok: true, session: sessionData.session };
+  }
+
+  const { data: existingSessionData } = await supabase.auth.getSession();
+  if (existingSessionData.session) {
+    await ensureUserProfile(existingSessionData.session.user);
+    return { ok: true, session: existingSessionData.session };
+  }
+
+  return {
+    ok: false,
+    message: `로그인 인증값을 받지 못했어요. 받은 값: ${
+      Object.keys(queryParams).join(', ') || '없음'
+    }`,
+  };
 }
 
 export async function signOut() {
@@ -90,5 +123,20 @@ function stringParam(value: unknown) {
 
 function parseQueryParams(url: string) {
   const parsed = new URL(url);
-  return Object.fromEntries(parsed.searchParams.entries());
+  const params = new URLSearchParams(parsed.searchParams);
+
+  if (parsed.hash.startsWith('#')) {
+    const hashParams = new URLSearchParams(parsed.hash.slice(1));
+    hashParams.forEach((value, key) => {
+      params.set(key, value);
+    });
+  }
+
+  return Object.fromEntries(params.entries());
+}
+
+function sanitizeAuthUrl(url: string) {
+  return url
+    .replace(/([?&#](?:access_token|refresh_token|provider_token|code)=)[^&#]+/g, '$1[redacted]')
+    .replace(/([?&#](?:error_description)=)[^&#]+/g, '$1[redacted]');
 }
