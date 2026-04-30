@@ -11,6 +11,7 @@ export interface ReportInput {
   floor?: string;
   genderType?: string;
   hasPassword: boolean;
+  operatingHours?: string;
   comment?: string;
 }
 
@@ -46,6 +47,7 @@ export async function submitReport(input: ReportInput): Promise<ReportResult> {
       floor: input.floor?.trim() || null,
       gender_type: input.genderType?.trim() || null,
       has_password: input.hasPassword,
+      operating_hours: input.operatingHours?.trim() || null,
       comment: input.comment?.trim() || null,
     })
     .select('id')

@@ -31,6 +31,7 @@ export default function ReportScreen({ route, navigation }: Props) {
   const [accessType, setAccessType] = useState<(typeof accessTypes)[number]>('누구나');
   const [genderType, setGenderType] = useState<(typeof genderTypes)[number]>('정보 없음');
   const [hasPassword, setHasPassword] = useState(false);
+  const [operatingHours, setOperatingHours] = useState('');
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -52,6 +53,7 @@ export default function ReportScreen({ route, navigation }: Props) {
       accessType,
       genderType,
       hasPassword,
+      operatingHours: operatingHours.trim() || undefined,
       comment,
     });
     setSubmitting(false);
@@ -160,6 +162,16 @@ export default function ReportScreen({ route, navigation }: Props) {
           비밀번호 또는 출입 제한이 있어요
         </Text>
       </TouchableOpacity>
+
+      <Field label="운영시간">
+        <TextInput
+          value={operatingHours}
+          onChangeText={setOperatingHours}
+          placeholder="예: 09:00~22:00 / 주말 휴무 / 24시간"
+          placeholderTextColor={colors.textTertiary}
+          style={styles.input}
+        />
+      </Field>
 
       <Field label="메모">
         <TextInput

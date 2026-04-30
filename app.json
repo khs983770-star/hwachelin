@@ -20,7 +20,9 @@
           "NSAllowsArbitraryLoads": true
         },
         "NSLocationWhenInUseUsageDescription": "화슐랭이 주변 화장실을 찾기 위해 위치 정보를 사용합니다.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "화슐랭이 주변 화장실을 찾기 위해 위치 정보를 사용합니다."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "화슐랭이 주변 화장실을 찾기 위해 위치 정보를 사용합니다.",
+        "NSPhotoLibraryUsageDescription": "리뷰에 화장실 사진을 첨부하기 위해 사진첩 접근이 필요합니다.",
+        "NSCameraUsageDescription": "리뷰에 화장실 사진을 직접 촬영하여 첨부할 수 있습니다."
       }
     },
     "android": {
@@ -33,7 +35,9 @@
       "package": "com.hwachelin.app",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -46,6 +50,13 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "화슐랭이 주변 화장실을 찾기 위해 위치 정보를 사용합니다."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "리뷰에 화장실 사진을 첨부하기 위해 사진첩 접근이 필요합니다.",
+          "cameraPermission": "리뷰에 화장실 사진을 직접 촬영하여 첨부할 수 있습니다."
         }
       ],
       "expo-asset"

@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { readAsStringAsync } from 'expo-file-system';
 import { supabase } from './supabase';
 
 // ─── 비밀번호 의심 텍스트 필터 ───────────────────────────────────────────
@@ -47,6 +48,47 @@ export async function checkIsVerified(
   }
 }
 
+// ─── 리뷰 이미지 업로드 ───────────────────────────────────────────────────
+async function uploadReviewImages(userId: string, uris: string[]): Promise<string[]> {
+  const urls: string[] = [];
+
+  for (const uri of uris) {
+    try {
+      const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? ext : 'jpg';
+      const filename = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${safeExt}`;
+
+      // base64로 읽어서 ArrayBuffer로 변환
+      const base64 = await readAsStringAsync(uri, { encoding: 'base64' });
+      const byteCharacters = atob(base64);
+      const byteArray = new Uint8Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteArray[i] = byteCharacters.charCodeAt(i);
+      }
+
+      const { data, error } = await supabase.storage
+        .from('review-images')
+        .upload(filename, byteArray, {
+          contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+          upsert: false,
+        });
+
+      if (!error && data) {
+        const { data: urlData } = supabase.storage
+          .from('review-images')
+          .getPublicUrl(data.path);
+        urls.push(urlData.publicUrl);
+      } else if (error) {
+        console.warn('[reviewService] 이미지 업로드 실패:', error.message);
+      }
+    } catch (e) {
+      console.warn('[reviewService] 이미지 처리 오류:', e);
+    }
+  }
+
+  return urls;
+}
+
 // ─── 리뷰 insert ─────────────────────────────────────────────────────────
 export interface ReviewInput {
   toiletId: string;
@@ -57,9 +99,13 @@ export interface ReviewInput {
   paper: boolean;
   /** 비누 있음 */
   soap: boolean;
+  /** 비데 작동 여부 */
+  bidet: boolean;
   /** 시설/보안 그룹(도어락·조명·환기·안심) 중 하나라도 체크 */
   security: boolean;
   comment?: string;
+  /** 첨부할 이미지 로컬 URI 목록 (최대 3장) */
+  imageUris?: string[];
   toiletLat?: number;
   toiletLng?: number;
 }
@@ -86,11 +132,15 @@ export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
     };
   }
 
-  // 3. GPS 50m 인증
-  const isVerified =
+  // 3. GPS 50m 인증 + 이미지 업로드 병렬 처리
+  const [isVerified, imageUrls] = await Promise.all([
     input.toiletLat != null && input.toiletLng != null
-      ? await checkIsVerified(input.toiletLat, input.toiletLng)
-      : false;
+      ? checkIsVerified(input.toiletLat, input.toiletLng)
+      : Promise.resolve(false),
+    input.imageUris?.length
+      ? uploadReviewImages(user.id, input.imageUris.slice(0, 3))
+      : Promise.resolve([]),
+  ]);
 
   // 4. Supabase insert
   const { error } = await supabase.from('reviews').insert({
@@ -100,8 +150,10 @@ export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
     cleanliness: input.cleanliness,
     paper: input.paper,
     soap: input.soap,
+    bidet: input.bidet,
     security: input.security,
     comment: input.comment?.trim() || null,
+    image_urls: imageUrls,
     is_verified: isVerified,
   });
 
@@ -131,6 +183,13 @@ export async function updateReview(
     };
   }
 
+  // 새로 추가한 이미지 업로드 (로컬 URI만, http로 시작하는 기존 URL은 제외)
+  const newUris = (input.imageUris ?? []).filter((u) => !u.startsWith('http'));
+  const existingUrls = (input.imageUris ?? []).filter((u) => u.startsWith('http'));
+
+  const uploadedUrls = newUris.length ? await uploadReviewImages(user.id, newUris) : [];
+  const finalImageUrls = [...existingUrls, ...uploadedUrls].slice(0, 3);
+
   const { error } = await supabase
     .from('reviews')
     .update({
@@ -138,8 +197,10 @@ export async function updateReview(
       cleanliness: input.cleanliness,
       paper: input.paper,
       soap: input.soap,
+      bidet: input.bidet,
       security: input.security,
       comment: input.comment?.trim() || null,
+      image_urls: finalImageUrls,
     })
     .eq('id', reviewId)
     .eq('user_id', user.id);

@@ -26,10 +26,10 @@ const DEFAULT_LNG = 126.978;
 const STAR_FILTER = '별점';
 const FILTER_OPTIONS = [
   { label: '전체', enabled: true },
-  { label: '24시간', enabled: false },
-  { label: '비데', enabled: false },
+  { label: '24시간', enabled: true },
+  { label: '비데', enabled: true },
   { label: '개방형', enabled: true },
-  { label: '기저귀', enabled: false },
+  { label: '기저귀', enabled: true },
   { label: '남녀분리', enabled: true },
   { label: STAR_FILTER, enabled: true },
 ] as const;
@@ -79,6 +79,13 @@ export default function MapScreen() {
         matchesFilter = toilet.gender_type === '남녀분리';
       } else if (selectedFilter === STAR_FILTER) {
         matchesFilter = (toilet.avg_rating ?? 0) >= 4.3;
+      } else if (selectedFilter === '24시간') {
+        matchesFilter = toilet.is_24hours === true;
+      } else if (selectedFilter === '비데') {
+        // 리뷰 50% 이상이 비데 체크한 경우
+        matchesFilter = (toilet.bidet_rate ?? 0) >= 0.5;
+      } else if (selectedFilter === '기저귀') {
+        matchesFilter = toilet.has_diaper_table === true;
       }
 
       return matchesSearch && matchesFilter;

@@ -7,6 +7,9 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   Dimensions,
+  Linking,
+  Platform,
+  Alert,
 } from 'react-native';
 import { ToiletMarkerData } from '../types/toilet';
 import { colors } from '../constants/theme';
@@ -18,6 +21,34 @@ interface Props {
   toilet: ToiletMarkerData | null;
   onClose: () => void;
   onDetailPress: (toilet: ToiletMarkerData) => void;
+}
+
+async function openNavigation(toilet: ToiletMarkerData) {
+  const { lat, lng, name } = toilet;
+  const encodedName = encodeURIComponent(name);
+
+  // 1순위: 카카오맵 앱 딥링크
+  const kakaoAppUrl = `kakaomap://route?ep=${lat},${lng}&by=FOOT`;
+  const canOpenKakao = await Linking.canOpenURL(kakaoAppUrl).catch(() => false);
+  if (canOpenKakao) {
+    Linking.openURL(kakaoAppUrl);
+    return;
+  }
+
+  // 2순위: iOS Apple 지도 / Android 구글 지도
+  if (Platform.OS === 'ios') {
+    Linking.openURL(`maps://?daddr=${lat},${lng}&dirflg=w`);
+    return;
+  }
+  const googleUrl = `google.navigation:q=${lat},${lng}`;
+  const canOpenGoogle = await Linking.canOpenURL(googleUrl).catch(() => false);
+  if (canOpenGoogle) {
+    Linking.openURL(googleUrl);
+    return;
+  }
+
+  // 3순위: 카카오맵 웹
+  Linking.openURL(`https://map.kakao.com/link/to/${encodedName},${lat},${lng}`);
 }
 
 export default function ToiletBottomSheet({ toilet, onClose, onDetailPress }: Props) {
@@ -130,8 +161,12 @@ export default function ToiletBottomSheet({ toilet, onClose, onDetailPress }: Pr
         </View>
 
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.outlineBtn}>
-            <Text style={styles.outlineBtnText}>길찾기</Text>
+          <TouchableOpacity
+            style={styles.outlineBtn}
+            onPress={() => toilet && openNavigation(toilet)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.outlineBtnText}>🗺️ 길찾기</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.detailBtn}

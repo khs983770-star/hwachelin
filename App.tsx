@@ -1,14 +1,22 @@
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Text } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapScreen from './app/(tabs)/index';
 import MyPageScreen from './app/(tabs)/mypage';
 import GoldScreen from './app/(tabs)/gold';
 import ToiletDetailScreen from './app/ToiletDetailScreen';
 import ReviewWriteScreen from './app/ReviewWriteScreen';
 import ReportScreen from './app/ReportScreen';
+import MyBookmarksScreen from './app/MyBookmarksScreen';
+import MyReviewsScreen from './app/MyReviewsScreen';
+import OnboardingScreen, { ONBOARDING_DONE_KEY } from './app/OnboardingScreen';
+import AdminScreen from './app/AdminScreen';
+import PolicyScreen from './app/PolicyScreen';
 import { RootStackParamList } from './types/navigation';
 import { colors } from './constants/theme';
 
@@ -56,10 +64,28 @@ function MainTabs() {
 }
 
 export default function App() {
+  const [initialRoute, setInitialRoute] = useState<'Onboarding' | 'MainTabs' | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(ONBOARDING_DONE_KEY).then((value) => {
+      setInitialRoute(value === 'true' ? 'MainTabs' : 'Onboarding');
+    });
+  }, []);
+
+  // 온보딩 여부 확인 중에는 스플래시 유지
+  if (initialRoute === null) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.backgroundPrimary }}>
+        <ActivityIndicator color={colors.orange} />
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <NavigationContainer>
         <Stack.Navigator
+          initialRouteName={initialRoute}
           screenOptions={{
             headerTintColor: colors.textPrimary,
             headerTitleStyle: { fontWeight: '700' },
@@ -67,6 +93,11 @@ export default function App() {
             contentStyle: { backgroundColor: colors.backgroundPrimary },
           }}
         >
+          <Stack.Screen
+            name="Onboarding"
+            component={OnboardingScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name="MainTabs"
             component={MainTabs}
@@ -86,6 +117,28 @@ export default function App() {
             name="Report"
             component={ReportScreen}
             options={{ title: '화장실 제보' }}
+          />
+          <Stack.Screen
+            name="MyBookmarks"
+            component={MyBookmarksScreen}
+            options={{ title: '저장한 장소' }}
+          />
+          <Stack.Screen
+            name="MyReviews"
+            component={MyReviewsScreen}
+            options={{ title: '내가 평가한 화장실' }}
+          />
+          <Stack.Screen
+            name="Admin"
+            component={AdminScreen}
+            options={{ title: '제보 관리' }}
+          />
+          <Stack.Screen
+            name="Policy"
+            component={PolicyScreen}
+            options={({ route }) => ({
+              title: route.params?.type === 'privacy' ? '개인정보처리방침' : '이용약관',
+            })}
           />
         </Stack.Navigator>
       </NavigationContainer>

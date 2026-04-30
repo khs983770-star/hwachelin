@@ -34,7 +34,9 @@ export interface Review {
   paper: boolean;
   soap: boolean;
   security: boolean;
-  comment?: string;
+  bidet: boolean;
+  comment?: string | null;
+  image_urls: string[];
   is_verified: boolean;
   created_at: string;
 }
@@ -52,4 +54,12 @@ export interface ToiletMarkerData {
   gender_type?: string | null;
   avg_rating?: number;
   review_count?: number;
+  /** 리뷰 중 비데 체크 비율 (0~1) */
+  bidet_rate?: number;
+  /** 24시간 운영 여부 */
+  is_24hours?: boolean;
+  /** 기저귀 교환대 여부 */
+  has_diaper_table?: boolean;
+  /** 운영시간 텍스트 (예: "09:00~22:00 / 주말 휴무") */
+  operating_hours?: string | null;
 }

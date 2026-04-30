@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,6 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { getToiletDetail } from '../lib/toiletService';
 import { deleteReview } from '../lib/reviewService';
+import { checkIsBookmarked, toggleBookmark } from '../lib/bookmarkService';
 import { supabase } from '../lib/supabase';
 import { RootStackParamList } from '../types/navigation';
 import { Review } from '../types/toilet';
@@ -28,6 +30,32 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+
+  // 헤더 오른쪽에 북마크 버튼
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={handleToggleBookmark}
+          style={{ marginRight: 4, padding: 6 }}
+        >
+          <Text style={{ fontSize: 22, opacity: isBookmarked ? 1 : 0.4 }}>🔖</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [isBookmarked, navigation]);
+
+  const handleToggleBookmark = async () => {
+    const result = await toggleBookmark(toiletId);
+    if (!result.ok) {
+      if (result.reason === 'NOT_LOGGED_IN') {
+        Alert.alert('로그인 필요', '저장하려면 카카오 로그인이 필요해요.');
+      }
+      return;
+    }
+    setIsBookmarked(result.isBookmarked);
+  };
 
   const loadDetail = useCallback(async () => {
     const data = await getToiletDetail(toiletId);
@@ -40,13 +68,15 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
 
       (async () => {
         setLoading(true);
-        const [{ data: sessionData }, data] = await Promise.all([
+        const [{ data: sessionData }, data, bookmarked] = await Promise.all([
           supabase.auth.getSession(),
           getToiletDetail(toiletId),
+          checkIsBookmarked(toiletId),
         ]);
         if (!active) return;
         setCurrentUserId(sessionData.session?.user.id ?? null);
         setDetail(data);
+        setIsBookmarked(bookmarked);
         setLoading(false);
       })();
 
@@ -145,6 +175,15 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
             label="데이터 출처"
             value={place?.source === 'public' ? '공공데이터' : '사용자 제보'}
           />
+          {!!detail.operating_hours && (
+            <InfoTile icon="🕐" label="운영시간" value={detail.operating_hours} />
+          )}
+          {detail.is_24hours && (
+            <InfoTile icon="24" label="24시간" value="24시간 운영" />
+          )}
+          {detail.has_diaper_table && (
+            <InfoTile icon="👶" label="기저귀교환대" value="있음" />
+          )}
         </View>
       </View>
 
@@ -206,8 +245,24 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
                   {isMine && <Text style={styles.myReviewBadge}>내 리뷰</Text>}
                 </View>
                 {!!review.comment && <Text style={styles.reviewComment}>{review.comment}</Text>}
+                {review.image_urls?.length > 0 && (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.reviewImageRow}
+                    contentContainerStyle={{ gap: 6 }}
+                  >
+                    {review.image_urls.map((url, i) => (
+                      <Image
+                        key={url + i}
+                        source={{ uri: url }}
+                        style={styles.reviewImage}
+                      />
+                    ))}
+                  </ScrollView>
+                )}
                 <Text style={styles.reviewMeta}>
-                  {review.is_verified ? '현장 인증' : '일반 리뷰'} ·{' '}
+                  {review.is_verified ? '✅ 현장 인증' : '일반 리뷰'} ·{' '}
                   {new Date(review.created_at).toLocaleDateString('ko-KR')}
                 </Text>
                 {isMine && (
@@ -224,7 +279,9 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
                           initialPaper: review.paper,
                           initialSoap: review.soap,
                           initialSecurity: review.security,
+                          initialBidet: review.bidet,
                           initialComment: review.comment ?? '',
+                          initialImageUrls: review.image_urls ?? [],
                           toiletLat: place?.lat,
                           toiletLng: place?.lng,
                         })
@@ -400,6 +457,8 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   reviewComment: { fontSize: 13, lineHeight: 19, color: colors.textPrimary, marginBottom: 7 },
+  reviewImageRow: { marginBottom: 7 },
+  reviewImage: { width: 80, height: 80, borderRadius: 8 },
   reviewMeta: { fontSize: 11, color: colors.textTertiary },
   reviewActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   reviewActionButton: {
