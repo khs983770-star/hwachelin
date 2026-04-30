@@ -559,8 +559,12 @@ npm run demo:cityhall -- --count=1000
 - 로그인된 시뮬레이터 세션으로 Supabase RLS `reviews_insert` 검증 완료
   - 사용자 세션 기반 `reviews` insert 성공
   - insert된 row 재조회 성공
-  - 검증용 리뷰 row 삭제 정리 완료
-- 남은 작업: 앱 UI에서 실제 사용자가 리뷰를 작성했을 때 상세 화면과 마이페이지 카운트가 기대대로 갱신되는지 수동 QA
+  - 검증용 리뷰 row는 `reviews_delete` 정책이 없어 사용자 세션 삭제 0건 처리됨
+- 실제 앱 리뷰 작성 후 확인된 이슈 수정 완료
+  - 마이페이지 탭 재진입 시 세션과 리뷰 카운트를 다시 조회하도록 수정
+  - 지도 탭 재진입 시 현재 지도 중심 기준으로 핀 리뷰 통계를 다시 조회하도록 수정
+  - 선택된 핀도 최신 `avg_rating`, `review_count` 값으로 갱신
+- 남은 작업: 검증용 `Codex 리뷰 저장 연결 테스트...` row는 Supabase Dashboard 또는 service role로 수동 삭제
 
 ### 6순위: 화장실 제보 화면
 

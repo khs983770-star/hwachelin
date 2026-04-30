@@ -11,7 +11,7 @@ import {
 import MapView, { Marker, Region, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getToiletsInRegion } from '../../lib/toiletService';
 import { ToiletMarkerData } from '../../types/toilet';
@@ -44,6 +44,7 @@ export default function MapScreen() {
   const [toilets, setToilets] = useState<ToiletMarkerData[]>([]);
   const [selectedToilet, setSelectedToilet] = useState<ToiletMarkerData | null>(null);
   const [toiletLoading, setToiletLoading] = useState(false);
+  const [mapCenter, setMapCenter] = useState({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
   const [selectedFilter, setSelectedFilter] = useState('전체');
   const [searchQuery, setSearchQuery] = useState('');
   const isShowingDemoData = toilets.some(
@@ -97,8 +98,17 @@ export default function MapScreen() {
     setToiletLoading(true);
     const data = await getToiletsInRegion(lat, lng, 3);
     setToilets(data);
+    setSelectedToilet((current) =>
+      current ? data.find((toilet) => toilet.toilet_id === current.toilet_id) ?? current : null
+    );
     setToiletLoading(false);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchToilets(mapCenter.lat, mapCenter.lng);
+    }, [fetchToilets, mapCenter.lat, mapCenter.lng])
+  );
 
   // 위치 권한 + 초기 위치 가져오기
   useEffect(() => {
@@ -118,6 +128,7 @@ export default function MapScreen() {
         const lat = loc.coords.latitude;
         const lng = loc.coords.longitude;
         setLocation({ lat, lng });
+        setMapCenter({ lat, lng });
         fetchToilets(lat, lng);
       } catch (e) {
         console.log('위치 가져오기 실패, 기본 위치 사용');
@@ -135,6 +146,7 @@ export default function MapScreen() {
     (region: { lat: number; lng: number }) => {
       if (regionChangeTimer.current) clearTimeout(regionChangeTimer.current);
       regionChangeTimer.current = setTimeout(() => {
+        setMapCenter(region);
         fetchToilets(region.lat, region.lng);
       }, 600);
     },

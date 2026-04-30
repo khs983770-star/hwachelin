@@ -8,6 +8,7 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Session } from '@supabase/supabase-js';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../constants/theme';
@@ -56,6 +57,27 @@ export default function MyPage() {
       subscription.unsubscribe();
     };
   }, [loadReviewCount]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      (async () => {
+        const { data } = await supabase.auth.getSession();
+        if (!active) return;
+        setSession(data.session);
+        if (data.session?.user.id) {
+          await loadReviewCount(data.session.user.id);
+        } else {
+          setReviewCount(0);
+        }
+      })();
+
+      return () => {
+        active = false;
+      };
+    }, [loadReviewCount])
+  );
 
   const login = async () => {
     setAuthLoading(true);
