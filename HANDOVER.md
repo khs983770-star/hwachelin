@@ -510,15 +510,42 @@ npm run demo:cityhall -- --count=1000
 - `npm run public-toilets:sync:mcp` 수동 1회 실행 성공
 - `npx tsc --noEmit` 통과
 
-### 5순위: 카카오 로그인
+### 5순위: 카카오 로그인 - 앱 구현 완료, Supabase Provider 설정 필요
 
 리뷰 저장과 제보 기능을 제대로 하려면 로그인 필요.
 
-필요 작업:
-- Kakao Developers Redirect URI 설정
-- `expo-web-browser` 기반 OAuth 플로우
-- Supabase Auth 연동 방식 결정
-- `users` 테이블 프로필 생성/동기화
+완료한 앱 작업:
+- `lib/authService.ts` 추가
+  - `supabase.auth.signInWithOAuth({ provider: 'kakao' })`
+  - `expo-web-browser` 기반 OAuth 세션 열기
+  - 앱 딥링크 redirect URL로 돌아온 `code`를 `exchangeCodeForSession()`으로 세션화
+  - 로그인 성공 후 `public.users`에 `{ id, nickname }` insert
+- 마이페이지 로그인 UI 추가
+  - 카카오 로그인 버튼
+  - 로그인 상태 표시
+  - 로그아웃
+  - 내가 작성한 리뷰 수 표시
+- 리뷰 작성 화면에서 비로그인 상태일 때 `로그인하기` 액션 연결
+- RLS 확인 완료
+  - `reviews_insert`: `auth.uid() = user_id`
+  - `users_insert`: `auth.uid() = id`
+
+필요한 외부 설정:
+1. Supabase Dashboard → Authentication → Providers → Kakao 활성화
+   - Kakao REST API Key 입력
+   - Kakao Client Secret은 Kakao Developers에서 사용 설정한 경우에만 입력
+2. Supabase Dashboard → Authentication → URL Configuration
+   - Redirect URL 추가: `hwachelin://auth/callback`
+3. Kakao Developers → 제품 설정 → 카카오 로그인
+   - 카카오 로그인 활성화
+   - Redirect URI 추가: `https://jdcymglzmcnewgsimatc.supabase.co/auth/v1/callback`
+4. Kakao Developers → 동의항목
+   - 닉네임/profile nickname 동의항목 확인
+
+현재 검증 상태:
+- `npx tsc --noEmit` 통과
+- Supabase authorize endpoint 확인 결과: `Unsupported provider: provider is not enabled`
+- 즉, 앱 코드는 준비됐고 Supabase Kakao provider 설정 후 실제 로그인/리뷰 저장 테스트 가능
 
 ### 6순위: 화장실 제보 화면
 

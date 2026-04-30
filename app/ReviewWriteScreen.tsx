@@ -13,6 +13,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { colors } from '../constants/theme';
 import { submitReview } from '../lib/reviewService';
+import { signInWithKakao } from '../lib/authService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ReviewWrite'>;
 
@@ -94,8 +95,17 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
       if (result.reason === 'NOT_LOGGED_IN') {
         Alert.alert(
           '로그인이 필요해요',
-          '리뷰를 작성하려면 로그인이 필요해요.\n카카오 로그인은 곧 추가될 예정이에요!',
-          [{ text: '확인' }]
+          '리뷰를 작성하려면 카카오 로그인이 필요해요.',
+          [
+            { text: '나중에', style: 'cancel' },
+            {
+              text: '로그인하기',
+              onPress: async () => {
+                const loginResult = await signInWithKakao();
+                if (!loginResult.ok) Alert.alert('로그인 실패', loginResult.message);
+              },
+            },
+          ]
         );
       } else if (result.reason === 'SENSITIVE_TEXT') {
         Alert.alert('작성 불가', result.message, [{ text: '수정할게요' }]);

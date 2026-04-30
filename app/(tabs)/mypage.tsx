@@ -1,9 +1,82 @@
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+} from 'react-native';
+import { Session } from '@supabase/supabase-js';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../constants/theme';
+import { signInWithKakao, signOut } from '../../lib/authService';
+import { supabase } from '../../lib/supabase';
 
 export default function MyPage() {
   const insets = useSafeAreaInsets();
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [reviewCount, setReviewCount] = useState(0);
+
+  const loadReviewCount = useCallback(async (userId: string) => {
+    const { count, error } = await supabase
+      .from('reviews')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId);
+
+    if (!error) setReviewCount(count ?? 0);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      if (data.session?.user.id) loadReviewCount(data.session.user.id);
+      setLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (nextSession?.user.id) {
+        loadReviewCount(nextSession.user.id);
+      } else {
+        setReviewCount(0);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [loadReviewCount]);
+
+  const login = async () => {
+    setAuthLoading(true);
+    const result = await signInWithKakao();
+    setAuthLoading(false);
+
+    if (!result.ok) {
+      Alert.alert('로그인 실패', result.message);
+    }
+  };
+
+  const logout = () => {
+    Alert.alert('로그아웃할까요?', '현재 계정에서 로그아웃합니다.', [
+      { text: '취소', style: 'cancel' },
+      { text: '로그아웃', style: 'destructive', onPress: signOut },
+    ]);
+  };
+
+  const user = session?.user ?? null;
+  const displayName =
+    user?.user_metadata?.nickname ?? user?.user_metadata?.name ?? user?.email ?? '화슐랭러';
 
   return (
     <ScrollView
@@ -17,16 +90,33 @@ export default function MyPage() {
 
       <View style={styles.profile}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>화</Text>
+          <Text style={styles.avatarText}>{user ? String(displayName).slice(0, 1) : '화'}</Text>
         </View>
         <View>
-          <Text style={styles.name}>화슐랭러</Text>
-          <Text style={styles.profileSub}>깨끗한 화장실을 찾아다니는 중</Text>
+          <Text style={styles.name}>{loading ? '확인 중...' : displayName}</Text>
+          <Text style={styles.profileSub}>
+            {user ? '카카오 계정으로 로그인됨' : '리뷰를 남기려면 로그인이 필요해요'}
+          </Text>
         </View>
       </View>
 
+      <TouchableOpacity
+        style={[styles.authButton, user && styles.authButtonSecondary]}
+        onPress={user ? logout : login}
+        activeOpacity={0.85}
+        disabled={authLoading || loading}
+      >
+        {authLoading ? (
+          <ActivityIndicator color={user ? colors.textSecondary : '#2B1F16'} />
+        ) : (
+          <Text style={[styles.authButtonText, user && styles.authButtonTextSecondary]}>
+            {user ? '로그아웃' : '카카오로 로그인'}
+          </Text>
+        )}
+      </TouchableOpacity>
+
       <View style={styles.stats}>
-        <StatCard value="0" label="작성 리뷰" />
+        <StatCard value={String(reviewCount)} label="작성 리뷰" />
         <StatCard value="3" label="저장 장소" />
       </View>
 
@@ -96,6 +186,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderTertiary,
   },
+  authButton: {
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#FEE500',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  authButtonSecondary: {
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSecondary,
+  },
+  authButtonText: { fontSize: 14, color: '#2B1F16', fontWeight: '700' },
+  authButtonTextSecondary: { color: colors.textSecondary },
   avatar: {
     width: 52,
     height: 52,
