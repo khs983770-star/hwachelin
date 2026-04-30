@@ -30,7 +30,11 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.hwachelin.app"
+      "package": "com.hwachelin.app",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -46,6 +50,12 @@
       ],
       "expo-asset"
     ],
-    "scheme": "hwachelin"
+    "scheme": "hwachelin",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "69783862-edb0-41fb-aa5b-9cdc11bb498a"
+      }
+    }
   }
 }
