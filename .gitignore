@@ -30,12 +30,19 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# local tool config/cache
+config/
+
 # local env files
 .env*.local
 
 # typescript
 *.tsbuildinfo
 
+# generated import output
+tmp/
+
 # generated native folders
 /ios
 /android
+.env.local

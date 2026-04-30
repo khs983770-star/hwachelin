@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "hwachelin",
+    "name": "화슐랭",
     "slug": "hwachelin",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,7 +13,15 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.hwachelin.app",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSLocationWhenInUseUsageDescription": "화슐랭이 주변 화장실을 찾기 위해 위치 정보를 사용합니다.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "화슐랭이 주변 화장실을 찾기 위해 위치 정보를 사용합니다."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,10 +29,23 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.hwachelin.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "화슐랭이 주변 화장실을 찾기 위해 위치 정보를 사용합니다."
+        }
+      ],
+      "expo-asset"
+    ],
+    "scheme": "hwachelin"
   }
 }

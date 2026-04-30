@@ -1,0 +1,642 @@
+
+<style>
+:root{--color-background-primary:#fffdfb;--color-background-secondary:#f7f5f2;--color-border-secondary:#ddd6cf;--color-border-tertiary:#ede7e1;--color-text-primary:#211b17;--color-text-secondary:#6f6259;--color-text-tertiary:#9b8f87;--font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{min-height:100vh;background:linear-gradient(180deg,#fff6f0 0%,#f5f3ef 62%,#ece7df 100%);font-family:var(--font-sans);}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+.pw{display:flex;justify-content:center;padding:1.5rem 0;}
+.phone{width:360px;background:var(--color-background-primary);border-radius:32px;border:1px solid rgba(82,63,48,.18);overflow:hidden;display:flex;flex-direction:column;min-height:720px;box-shadow:0 24px 70px rgba(55,39,27,.22),0 2px 9px rgba(55,39,27,.08);}
+.sbar{background:#211b17;color:white;font-size:11px;padding:8px 20px 6px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
+.screen{display:none;flex:1;flex-direction:column;overflow:hidden;}
+.screen.active{display:flex;}
+
+.topbar{background:rgba(255,253,251,.96);border-bottom:0.5px solid var(--color-border-tertiary);padding:10px 14px 0;flex-shrink:0;backdrop-filter:blur(14px);}
+.logo-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;}
+.brand{display:flex;align-items:center;gap:9px;min-width:0;}
+.brand-mark{position:relative;width:38px;height:38px;border-radius:13px;background:linear-gradient(145deg,#52c9f3 0%,#1d87ee 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 6px 14px rgba(29,135,238,.22);flex-shrink:0;}
+.brand-mark::before{content:'';position:absolute;left:10px;top:7px;width:19px;height:19px;border-radius:50% 50% 50% 0;background:linear-gradient(160deg,#ffbd47 0%,#f47a22 100%);transform:rotate(-45deg);filter:drop-shadow(0 2px 2px rgba(93,45,9,.24));}
+.brand-mark::after{content:'★';position:absolute;left:13px;top:7px;color:#ffe76d;font-size:12px;line-height:1;text-shadow:0 1px 1px rgba(131,83,8,.35);}
+.brand-title{font-size:19px;font-weight:800;color:#15100d;letter-spacing:0;}
+.brand-sub{font-size:9px;color:#1d87ee;font-weight:800;letter-spacing:.55px;margin-top:-1px;white-space:nowrap;}
+.logo{display:flex;align-items:center;gap:9px;}
+.logo span{color:var(--color-text-primary);}
+.mypage-btn{width:34px;height:34px;border-radius:50%;background:var(--color-background-secondary);border:0.5px solid var(--color-border-secondary);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;transition:.18s ease;}
+.mypage-btn:hover{transform:translateY(-1px);border-color:#E55B26;}
+.search-row{display:flex;gap:8px;margin-bottom:8px;}
+.search-inp{flex:1;height:36px;border-radius:18px;border:0.5px solid var(--color-border-secondary);background:#fff;padding:0 13px;font-size:13px;color:var(--color-text-primary);outline:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.8);}
+.search-inp:focus{border-color:#E55B26;box-shadow:0 0 0 3px rgba(229,91,38,.12);}
+.filter-row{display:flex;gap:6px;padding-bottom:10px;overflow-x:auto;}
+.filter-row::-webkit-scrollbar{display:none;}
+.chip{white-space:nowrap;font-size:11px;padding:5px 10px;border-radius:12px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;}
+.chip.on{background:#E55B26;color:white;border-color:#E55B26;}
+.star-chip{white-space:nowrap;font-size:11px;padding:5px 10px;border-radius:12px;border:0.5px solid #F59E0B;background:#FEF3C7;color:#92400E;cursor:pointer;}
+.star-chip.on{background:#F59E0B;color:#412402;border-color:#F59E0B;}
+
+.map-wrap{flex:1;position:relative;overflow:hidden;min-height:0;}
+.map-bg{width:100%;height:100%;background:#e8ede2;}
+.map-svg{width:100%;height:100%;}
+.recenter{position:absolute;bottom:14px;right:12px;width:36px;height:36px;border-radius:50%;background:var(--color-background-primary);border:0.5px solid var(--color-border-secondary);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(42,31,23,.14);}
+.map-legend{position:absolute;top:12px;left:12px;display:flex;gap:6px;align-items:center;background:rgba(255,253,251,.92);border:0.5px solid rgba(82,63,48,.12);border-radius:14px;padding:6px 9px;font-size:10px;color:var(--color-text-secondary);box-shadow:0 8px 24px rgba(42,31,23,.1);}
+.legend-dot{color:#F59E0B;font-size:11px;letter-spacing:1px;margin-top:-1px;}
+.map-note{position:absolute;left:12px;right:58px;bottom:14px;background:rgba(33,27,23,.86);color:#fff;border-radius:13px;padding:8px 10px;font-size:11px;line-height:1.35;display:flex;align-items:center;gap:8px;box-shadow:0 10px 28px rgba(33,27,23,.18);}
+.map-note strong{font-size:12px;font-weight:600;color:#FFE4D5;}
+.pin-core{transition:.18s ease;filter:url(#markerShadow);}
+.pin-core:hover,.cluster-pin:hover{transform:translateY(-2px);}
+.cluster-pin{cursor:pointer;transition:.18s ease;filter:url(#markerShadow);}
+.cluster-halo{fill:#E55B26;opacity:.14;}
+.cluster-node{fill:#fff;stroke:#E55B26;stroke-width:2;}
+.cluster-count{fill:#E55B26;font-size:12px;font-weight:700;}
+.cluster-score{fill:#4f2b05;font-size:8px;font-weight:800;}
+.marker-score{fill:#4f2b05;font-size:9px;font-weight:800;}
+.marker-tip{fill:#f47a22;stroke:#fff;stroke-width:1.5;}
+.marker-star{stroke:#fff;stroke-width:2.4;stroke-linejoin:round;}
+.building-label{font-size:9px;fill:#6f6259;font-weight:600;}
+
+.pin-popup{position:absolute;left:50%;bottom:60px;transform:translateX(-50%);width:300px;background:rgba(255,253,251,.98);border:0.5px solid rgba(82,63,48,.16);border-radius:18px;padding:13px 14px;display:none;z-index:10;box-shadow:0 18px 45px rgba(45,32,23,.2);backdrop-filter:blur(18px);}
+.pin-popup.show{display:block;}
+.pp-name{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px;}
+.pp-meta{font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;}
+.pp-stars{color:#F59E0B;font-size:12px;}
+.pp-tags{display:flex;gap:4px;margin-top:7px;flex-wrap:wrap;}
+.pp-tag{font-size:10px;padding:2px 7px;border-radius:7px;border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);}
+.pp-building{display:none;margin:7px 0 8px;padding:7px 9px;border-radius:10px;background:#FFF3EC;color:#A43E16;font-size:11px;}
+.pin-popup.cluster .pp-building{display:block;}
+.cluster-list{display:none;margin-top:8px;border-top:0.5px solid var(--color-border-tertiary);padding-top:8px;}
+.pin-popup.cluster .cluster-list{display:block;}
+.cluster-place{display:grid;grid-template-columns:38px 1fr auto;gap:8px;align-items:center;padding:7px 0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer;}
+.cluster-place:last-child{border-bottom:none;padding-bottom:2px;}
+.cluster-place-score{height:28px;border-radius:9px;background:#FFF0E9;color:#C44A1A;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;}
+.cluster-place-name{font-size:12px;font-weight:600;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cluster-place-meta{font-size:10px;color:var(--color-text-tertiary);margin-top:1px;}
+.cluster-place-go{font-size:16px;color:var(--color-text-tertiary);}
+.pp-actions{display:flex;gap:6px;margin-top:10px;}
+.pp-dir{flex:1;padding:7px;border-radius:8px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);font-size:12px;color:var(--color-text-primary);cursor:pointer;text-align:center;}
+.pp-detail{flex:2;padding:7px;border-radius:8px;border:none;background:#E55B26;font-size:12px;font-weight:500;color:white;cursor:pointer;}
+.pp-close{position:absolute;top:8px;right:10px;font-size:16px;color:var(--color-text-tertiary);cursor:pointer;line-height:1;}
+.pp-score{font-size:22px;font-weight:500;color:#E55B26;margin-right:6px;}
+
+.bnav{display:flex;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);padding:8px 0 12px;flex-shrink:0;}
+.bnav-item{flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);cursor:pointer;}
+.bnav-item.on{color:#E55B26;}
+.bnav-icon{font-size:20px;display:block;margin-bottom:2px;}
+
+.detail-hdr{padding:12px 16px 10px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);flex-shrink:0;}
+.back-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;}
+.back-a{font-size:18px;color:var(--color-text-secondary);}
+.d-title{font-size:16px;font-weight:500;color:var(--color-text-primary);}
+.d-addr{font-size:12px;color:var(--color-text-secondary);margin-top:2px;}
+.score-row{display:flex;align-items:center;gap:10px;margin-top:8px;}
+.big-sc{font-size:30px;font-weight:500;color:#E55B26;}
+.stars-lg{color:#F59E0B;font-size:15px;}
+.d-scroll{flex:1;overflow-y:auto;padding:0 16px;}
+.sec-t{font-size:11px;font-weight:500;color:var(--color-text-tertiary);margin:12px 0 7px;letter-spacing:0.4px;}
+.fac-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
+.fac-item{background:var(--color-background-secondary);border-radius:10px;padding:9px 11px;display:flex;align-items:center;gap:7px;}
+.fac-lbl{font-size:11px;color:var(--color-text-secondary);}
+.fac-val{font-size:13px;font-weight:500;color:var(--color-text-primary);}
+.rv-item{padding:11px 0;border-bottom:0.5px solid var(--color-border-tertiary);}
+.rv-row{display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.rv-av{width:26px;height:26px;border-radius:50%;background:#dbeafe;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:#1e40af;flex-shrink:0;}
+.vbadge{background:#D1FAE5;color:#065F46;font-size:9px;padding:2px 6px;border-radius:5px;font-weight:500;}
+.rv-txt{font-size:13px;color:var(--color-text-secondary);line-height:1.5;}
+.rv-chip{display:inline-block;font-size:10px;padding:2px 7px;border-radius:7px;background:#FEF3C7;color:#92400E;margin-right:3px;}
+.d-actions{display:flex;gap:8px;padding:10px 16px;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);flex-shrink:0;}
+.out-btn{flex:1;padding:10px;border-radius:10px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);font-size:13px;font-weight:500;color:var(--color-text-primary);cursor:pointer;}
+.fill-btn{flex:1;padding:10px;border-radius:10px;border:none;background:#E55B26;font-size:13px;font-weight:500;color:white;cursor:pointer;}
+
+.rv-hdr{padding:12px 16px 10px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);flex-shrink:0;}
+.star-sel{display:flex;gap:7px;justify-content:center;margin:12px 0 3px;}
+.star-b{font-size:28px;cursor:pointer;color:#D1D5DB;line-height:1;}
+.star-b.lit{color:#F59E0B;}
+.sc-disp{text-align:center;font-size:22px;font-weight:500;color:#E55B26;margin-bottom:3px;}
+.cl-sec{padding:0 16px;overflow-y:auto;flex:1;}
+.cl-cat{font-size:11px;font-weight:500;color:var(--color-text-secondary);margin:12px 0 7px;letter-spacing:0.3px;}
+.cl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-bottom:5px;}
+.cl-item{padding:8px 11px;border-radius:9px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);font-size:12px;color:var(--color-text-secondary);cursor:pointer;display:flex;align-items:center;gap:5px;}
+.cl-item.sel{background:#FFF0E9;color:#C44A1A;border-color:#E55B26;}
+.cl-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0;}
+.photo-btn{margin:12px 16px 0;height:46px;border-radius:9px;border:0.5px dashed var(--color-border-secondary);background:var(--color-background-secondary);font-size:13px;color:var(--color-text-tertiary);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;}
+.memo-inp{width:calc(100% - 32px);margin:9px 16px 0;height:62px;padding:9px 11px;border-radius:9px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-secondary);font-size:13px;color:var(--color-text-primary);resize:none;outline:none;font-family:var(--font-sans);display:block;}
+.sub-row{padding:9px 16px 13px;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);flex-shrink:0;}
+.sub-btn{width:100%;padding:12px;border-radius:11px;border:none;background:#E55B26;font-size:14px;font-weight:500;color:white;cursor:pointer;}
+
+.gold-hdr{padding:12px 16px 10px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);flex-shrink:0;}
+.gold-title-row{display:flex;align-items:center;gap:7px;margin-bottom:3px;}
+.gold-list{flex:1;overflow-y:auto;padding:11px 16px;}
+.g-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:13px;padding:13px 15px;margin-bottom:9px;cursor:pointer;position:relative;overflow:hidden;}
+.g-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:#F59E0B;border-radius:13px 0 0 13px;}
+.g-rank{font-size:11px;font-weight:500;color:#B45309;margin-bottom:5px;margin-left:4px;}
+.g-name{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-left:4px;}
+.g-meta{font-size:12px;color:var(--color-text-secondary);margin-top:2px;margin-left:4px;}
+.g-row{display:flex;align-items:center;justify-content:space-between;margin-top:7px;}
+.g-score{font-size:21px;font-weight:500;color:#E55B26;}
+.g-tags{display:flex;gap:4px;flex-wrap:wrap;flex:1;padding-left:7px;}
+.g-tag{font-size:10px;padding:2px 7px;border-radius:7px;background:#FEF3C7;color:#92400E;}
+
+.mp-hdr{padding:12px 16px 10px;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);flex-shrink:0;}
+.mp-scroll{flex:1;overflow-y:auto;padding:0 16px;}
+.mp-profile{display:flex;align-items:center;gap:12px;padding:16px 0 14px;border-bottom:0.5px solid var(--color-border-tertiary);}
+.mp-avatar{width:52px;height:52px;border-radius:50%;background:#FEF0E7;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:500;color:#E55B26;flex-shrink:0;}
+.mp-name{font-size:16px;font-weight:500;color:var(--color-text-primary);}
+.mp-sub{font-size:12px;color:var(--color-text-secondary);margin-top:2px;}
+.mp-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:14px 0 12px;border-bottom:0.5px solid var(--color-border-tertiary);}
+.mp-stat{background:var(--color-background-secondary);border-radius:10px;padding:10px 12px;}
+.mp-stat-n{font-size:22px;font-weight:500;color:#E55B26;}
+.mp-stat-l{font-size:11px;color:var(--color-text-secondary);margin-top:2px;}
+.mp-sec{margin-top:14px;}
+.mp-sec-t{font-size:12px;font-weight:500;color:var(--color-text-tertiary);margin-bottom:9px;letter-spacing:0.3px;}
+.mp-item{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer;}
+.mp-item-l{display:flex;align-items:center;gap:10px;}
+.mp-ic{font-size:18px;width:32px;height:32px;border-radius:8px;background:var(--color-background-secondary);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.mp-item-name{font-size:14px;color:var(--color-text-primary);}
+.mp-item-sub{font-size:11px;color:var(--color-text-secondary);margin-top:1px;}
+.mp-arr{font-size:16px;color:var(--color-text-tertiary);}
+.mp-badge{font-size:11px;background:#FEF0E7;color:#C44A1A;padding:2px 8px;border-radius:8px;font-weight:500;}
+
+.star-filter-modal{display:none;position:absolute;bottom:48px;left:0;right:0;background:var(--color-background-primary);border-top:0.5px solid var(--color-border-secondary);padding:14px 16px;z-index:20;}
+.star-filter-modal.show{display:block;}
+.sf-title{font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:10px;}
+.sf-options{display:flex;gap:7px;flex-wrap:wrap;}
+.sf-opt{padding:6px 12px;border-radius:10px;border:0.5px solid var(--color-border-secondary);font-size:12px;color:var(--color-text-secondary);cursor:pointer;}
+.sf-opt.on{background:#FFF0E9;color:#C44A1A;border-color:#E55B26;}
+.sf-apply{width:100%;margin-top:11px;padding:10px;border-radius:10px;border:none;background:#E55B26;color:white;font-size:13px;font-weight:500;cursor:pointer;}
+</style>
+
+<h2 class="sr-only">화슐랭 앱 UI 프로토타입 — 지도, 상세, 리뷰 작성, 황금칸, 마이페이지 화면 포함</h2>
+<div class="pw">
+<div class="phone">
+  <div class="sbar"><span>9:41</span><span>화슐랭</span><span>●●● 🔋</span></div>
+
+  <!-- ===== SCREEN 0: MAP ===== -->
+  <div class="screen active" id="s0">
+    <div class="topbar">
+      <div class="logo-row">
+        <div class="brand" aria-label="화슐랭 Restroom Rating & Locator"><div class="brand-mark"></div><div><div class="brand-title">화슐랭</div><div class="brand-sub">RESTROOM RATING & LOCATOR</div></div></div>
+        <div class="mypage-btn" onclick="go(4)">👤</div>
+      </div>
+      <div class="search-row">
+        <input class="search-inp" placeholder="🔍  지역명, 장소명으로 검색">
+      </div>
+      <div class="filter-row">
+        <div class="chip on" onclick="chipClick(this)">전체</div>
+        <div class="chip" onclick="chipClick(this)">24시간</div>
+        <div class="chip" onclick="chipClick(this)">비데</div>
+        <div class="chip" onclick="chipClick(this)">개방형</div>
+        <div class="chip" onclick="chipClick(this)">기저귀</div>
+        <div class="chip" onclick="chipClick(this)">남녀분리</div>
+        <div class="star-chip" id="starChip" onclick="toggleStarFilter()">★ 별점</div>
+      </div>
+    </div>
+    <div class="map-wrap" id="mapWrap">
+      <div class="map-bg">
+        <svg class="map-svg" viewBox="0 0 360 300" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="smallGrid" width="18" height="18" patternUnits="userSpaceOnUse">
+              <path d="M18 0H0V18" fill="none" stroke="#d4dccf" stroke-width="0.7" opacity="0.45"/>
+            </pattern>
+            <linearGradient id="orangeStar" x1="0" y1="-20" x2="0" y2="18" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#ffd15a"/>
+              <stop offset=".48" stop-color="#ff9d2e"/>
+              <stop offset="1" stop-color="#ef5f22"/>
+            </linearGradient>
+            <linearGradient id="goldStar" x1="0" y1="-18" x2="0" y2="16" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#fff178"/>
+              <stop offset=".55" stop-color="#f7b523"/>
+              <stop offset="1" stop-color="#e08318"/>
+            </linearGradient>
+            <linearGradient id="grayStar" x1="0" y1="-18" x2="0" y2="16" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#b8b7af"/>
+              <stop offset="1" stop-color="#717069"/>
+            </linearGradient>
+            <linearGradient id="bronzePin" x1="0" y1="-24" x2="0" y2="30" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#f2bd75"/>
+              <stop offset=".45" stop-color="#9d4728"/>
+              <stop offset="1" stop-color="#6d271a"/>
+            </linearGradient>
+            <radialGradient id="medalFace" cx=".35" cy=".25" r=".78">
+              <stop offset="0" stop-color="#fff0a1"/>
+              <stop offset=".34" stop-color="#d9902f"/>
+              <stop offset=".72" stop-color="#9a3b24"/>
+              <stop offset="1" stop-color="#632018"/>
+            </radialGradient>
+            <linearGradient id="scoreRibbon" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#7c2f25"/>
+              <stop offset="1" stop-color="#3d1b17"/>
+            </linearGradient>
+            <filter id="markerShadow" x="-45%" y="-35%" width="190%" height="200%">
+              <feDropShadow dx="0" dy="5" stdDeviation="3" flood-color="#2b1f16" flood-opacity=".3"/>
+            </filter>
+          </defs>
+          <rect width="360" height="300" fill="url(#smallGrid)" opacity="0.8"/>
+          <line x1="0" y1="110" x2="360" y2="110" stroke="#fff" stroke-width="14" opacity="0.8"/>
+          <line x1="0" y1="200" x2="360" y2="200" stroke="#fff" stroke-width="10" opacity="0.7"/>
+          <line x1="120" y1="0" x2="120" y2="300" stroke="#fff" stroke-width="14" opacity="0.8"/>
+          <line x1="250" y1="0" x2="250" y2="300" stroke="#fff" stroke-width="8" opacity="0.6"/>
+          <line x1="60" y1="0" x2="60" y2="300" stroke="#fff" stroke-width="8" opacity="0.5"/>
+          <rect x="6" y="6" width="48" height="98" rx="4" fill="#d6ddd0" opacity="0.6"/>
+          <rect x="66" y="6" width="48" height="98" rx="4" fill="#d6ddd0" opacity="0.5"/>
+          <rect x="126" y="6" width="118" height="98" rx="5" fill="#cce4c8" opacity="0.5"/>
+          <rect x="139" y="20" width="92" height="70" rx="8" fill="#fff8f2" stroke="#E55B26" stroke-width="1.4" stroke-dasharray="4 3" opacity="0.92"/>
+          <text class="building-label" x="185" y="36" text-anchor="middle">메트로빌딩</text>
+          <rect x="256" y="6" width="98" height="98" rx="4" fill="#d6ddd0" opacity="0.5"/>
+          <rect x="6" y="116" width="108" height="78" rx="4" fill="#d6ddd0" opacity="0.5"/>
+          <rect x="126" y="116" width="118" height="78" rx="4" fill="#d6ddd0" opacity="0.5"/>
+          <rect x="256" y="116" width="98" height="78" rx="4" fill="#cce4c8" opacity="0.4"/>
+          <rect x="6" y="206" width="108" height="88" rx="4" fill="#d6ddd0" opacity="0.5"/>
+          <rect x="126" y="206" width="118" height="88" rx="4" fill="#d6ddd0" opacity="0.5"/>
+          <rect x="256" y="206" width="98" height="88" rx="4" fill="#d6ddd0" opacity="0.5"/>
+          <g id="pin1" class="pin-core" style="cursor:pointer" onclick="showPin(0)">
+            <path class="marker-star" d="M88 79 L94 92 L108 92 L97 101 L101 115 L88 107 L75 115 L79 101 L68 92 L82 92 Z" fill="url(#orangeStar)"/>
+            <text class="marker-score" x="88" y="99" text-anchor="middle" dominant-baseline="middle">4.8</text>
+            <path class="marker-tip" d="M88 113 L83 124 L93 124 Z"/>
+          </g>
+          <g id="cluster1" class="cluster-pin" onclick="showPin(1)">
+            <circle class="cluster-halo" cx="188" cy="66" r="33"/>
+            <path class="marker-star" d="M174 56 L178 66 L189 66 L180 72 L183 83 L174 77 L165 83 L168 72 L159 66 L170 66 Z" fill="url(#goldStar)"/>
+            <text class="cluster-score" x="174" y="70" text-anchor="middle" dominant-baseline="middle">4.2</text>
+            <path class="marker-star" d="M199 62 L203 72 L214 72 L205 78 L208 89 L199 83 L190 89 L193 78 L184 72 L195 72 Z" fill="url(#orangeStar)"/>
+            <text class="cluster-score" x="199" y="76" text-anchor="middle" dominant-baseline="middle">4.6</text>
+            <path class="marker-star" d="M190 36 L194 46 L205 46 L196 52 L199 63 L190 57 L181 63 L184 52 L175 46 L186 46 Z" fill="url(#grayStar)"/>
+            <text class="cluster-score" x="190" y="50" text-anchor="middle" dominant-baseline="middle">3.9</text>
+            <circle class="cluster-node" cx="209" cy="51" r="12"/>
+            <text class="cluster-count" x="209" y="52" text-anchor="middle" dominant-baseline="middle">3</text>
+            <path d="M188 87 L181 99 L195 99 Z" fill="#E55B26" stroke="white" stroke-width="1.5"/>
+          </g>
+          <g id="pin3" class="pin-core" style="cursor:pointer" onclick="showPin(2)">
+            <path class="marker-star" d="M298 137 L303 148 L315 148 L305 156 L309 168 L298 161 L287 168 L291 156 L281 148 L293 148 Z" fill="url(#grayStar)"/>
+            <text class="marker-score" x="298" y="154" text-anchor="middle" dominant-baseline="middle">3.6</text>
+            <path class="marker-tip" d="M298 166 L293 176 L303 176 Z" fill="#77766f"/>
+          </g>
+          <g id="pin4" class="pin-core" style="cursor:pointer" onclick="showPin(3)">
+            <path class="marker-star" d="M168 146 L175 161 L192 161 L179 172 L184 189 L168 179 L152 189 L157 172 L144 161 L161 161 Z" fill="url(#orangeStar)"/>
+            <text class="marker-score" x="168" y="169" text-anchor="middle" dominant-baseline="middle" font-size="10">4.9</text>
+            <path class="marker-tip" d="M168 187 L162 199 L174 199 Z"/>
+          </g>
+          <circle cx="190" cy="230" r="7" fill="#3B82F6" opacity="0.9"/>
+          <circle cx="190" cy="230" r="14" fill="#3B82F6" opacity="0.15"/>
+          <text x="204" y="234" font-size="10" fill="#1e40af">내 위치</text>
+        </svg>
+      </div>
+      <div class="map-legend"><span class="legend-dot">★★★</span><span>화슐랭 스타</span></div>
+      <div class="map-note"><strong>3</strong><span>한 건물에 여러 장소가 있으면 겹친 핀과 개수 배지로 묶어 보여줘요.</span></div>
+      <div class="recenter">⦿</div>
+      <div class="pin-popup" id="pinPopup">
+        <span class="pp-close" onclick="closePin()">×</span>
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">
+          <span class="pp-score" id="ppScore">4.9</span>
+          <div>
+            <div class="pp-name" id="ppName">강남역 지하 공중화장실</div>
+            <div class="pp-meta">
+              <span class="pp-stars" id="ppStars">★★★★★</span>
+              <span id="ppReviews">리뷰 128개</span>
+              <span id="ppDist">· 280m</span>
+            </div>
+          </div>
+        </div>
+        <div class="pp-building" id="ppBuilding">같은 건물 3개 장소</div>
+        <div class="pp-tags" id="ppTags"></div>
+        <div class="cluster-list" id="clusterList"></div>
+        <div class="pp-actions">
+          <div class="pp-dir">길찾기</div>
+          <button class="pp-detail" onclick="go(1)">상세보기 ›</button>
+        </div>
+      </div>
+      <div class="star-filter-modal" id="starModal">
+        <div class="sf-title">별점으로 필터</div>
+        <div class="sf-options">
+          <div class="sf-opt on" onclick="sfClick(this)">전체</div>
+          <div class="sf-opt" onclick="sfClick(this)">★ 4.5 이상</div>
+          <div class="sf-opt" onclick="sfClick(this)">★ 4.0 이상</div>
+          <div class="sf-opt" onclick="sfClick(this)">★ 3.5 이상</div>
+          <div class="sf-opt" onclick="sfClick(this)">★ 3.0 이상</div>
+        </div>
+        <button class="sf-apply" onclick="applyStarFilter()">적용하기</button>
+      </div>
+    </div>
+    <div class="bnav">
+      <div class="bnav-item on" onclick="go(0)"><span class="bnav-icon">🗺️</span>지도</div>
+      <div class="bnav-item" onclick="go(1)"><span class="bnav-icon">🚽</span>상세</div>
+      <div class="bnav-item" onclick="go(2)"><span class="bnav-icon">✏️</span>리뷰</div>
+      <div class="bnav-item" onclick="go(3)"><span class="bnav-icon">🏆</span>황금칸</div>
+      <div class="bnav-item" onclick="go(4)"><span class="bnav-icon">👤</span>마이</div>
+    </div>
+  </div>
+
+  <!-- ===== SCREEN 1: DETAIL ===== -->
+  <div class="screen" id="s1">
+    <div class="topbar">
+      <div class="logo-row">
+        <div class="brand" aria-label="화슐랭 Restroom Rating & Locator"><div class="brand-mark"></div><div><div class="brand-title">화슐랭</div><div class="brand-sub">RESTROOM RATING & LOCATOR</div></div></div>
+        <div class="mypage-btn" onclick="go(4)">👤</div>
+      </div>
+      <div class="search-row"><input class="search-inp" placeholder="🔍  지역명, 장소명으로 검색"></div>
+      <div class="filter-row">
+        <div class="chip on" onclick="chipClick(this)">전체</div>
+        <div class="chip" onclick="chipClick(this)">24시간</div>
+        <div class="chip" onclick="chipClick(this)">비데</div>
+        <div class="chip" onclick="chipClick(this)">개방형</div>
+        <div class="chip" onclick="chipClick(this)">남녀분리</div>
+        <div class="star-chip" onclick="toggleStarFilter()">★ 별점</div>
+      </div>
+    </div>
+    <div class="detail-hdr">
+      <div class="back-row" onclick="go(0)"><span class="back-a">‹</span><span style="font-size:13px;color:var(--color-text-secondary)">지도로 돌아가기</span></div>
+      <div class="d-title">강남역 지하 공중화장실</div>
+      <div class="d-addr">서울 강남구 강남대로 396 지하 2층</div>
+      <div class="score-row">
+        <div class="big-sc">4.9</div>
+        <div style="flex:1">
+          <div class="stars-lg">★★★★★</div>
+          <div style="font-size:12px;color:var(--color-text-secondary)">인증 리뷰 128개 · 280m</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--color-text-tertiary)">영업시간</div>
+          <div style="font-size:13px;font-weight:500;color:#059669">24시간 개방</div>
+        </div>
+      </div>
+    </div>
+    <div class="d-scroll">
+      <div class="sec-t">시설 현황</div>
+      <div class="fac-grid">
+        <div class="fac-item"><span style="font-size:18px">🚿</span><div><div class="fac-lbl">비데</div><div class="fac-val">전 칸 설치</div></div></div>
+        <div class="fac-item"><span style="font-size:18px">👶</span><div><div class="fac-lbl">기저귀교환대</div><div class="fac-val">여성 칸 내</div></div></div>
+        <div class="fac-item"><span style="font-size:18px">🔒</span><div><div class="fac-lbl">도어락</div><div class="fac-val">있음</div></div></div>
+        <div class="fac-item"><span style="font-size:18px">♿</span><div><div class="fac-lbl">장애인 칸</div><div class="fac-val">1칸</div></div></div>
+      </div>
+      <div class="sec-t">리뷰</div>
+      <div class="rv-item">
+        <div class="rv-row"><div class="rv-av">김지</div><span style="font-size:13px;font-weight:500;color:var(--color-text-primary)">김지은</span><span class="pp-stars" style="font-size:11px">★★★★★</span><span class="vbadge">GPS인증</span></div>
+        <div class="rv-txt">청결 상태가 정말 훌륭해요. 비데도 잘 작동하고 휴지도 항상 채워져 있어요.</div>
+        <div style="margin-top:5px"><span class="rv-chip">청결 ✓</span><span class="rv-chip">비치물품 ✓</span><span class="rv-chip">냄새없음 ✓</span></div>
+      </div>
+      <div class="rv-item">
+        <div class="rv-row"><div class="rv-av" style="background:#fce7f3;color:#9d174d">박민</div><span style="font-size:13px;font-weight:500;color:var(--color-text-primary)">박민준</span><span class="pp-stars" style="font-size:11px">★★★★☆</span><span class="vbadge">GPS인증</span></div>
+        <div class="rv-txt">주말엔 살짝 붐비지만 관리가 잘 돼요. 자주 들러도 늘 깨끗합니다.</div>
+        <div style="margin-top:5px"><span class="rv-chip">청결 ✓</span><span class="rv-chip">혼잡주의</span></div>
+      </div>
+      <div style="height:14px"></div>
+    </div>
+    <div class="d-actions">
+      <button class="out-btn">길찾기</button>
+      <button class="fill-btn" onclick="go(2)">리뷰 작성</button>
+    </div>
+    <div class="bnav">
+      <div class="bnav-item" onclick="go(0)"><span class="bnav-icon">🗺️</span>지도</div>
+      <div class="bnav-item on" onclick="go(1)"><span class="bnav-icon">🚽</span>상세</div>
+      <div class="bnav-item" onclick="go(2)"><span class="bnav-icon">✏️</span>리뷰</div>
+      <div class="bnav-item" onclick="go(3)"><span class="bnav-icon">🏆</span>황금칸</div>
+      <div class="bnav-item" onclick="go(4)"><span class="bnav-icon">👤</span>마이</div>
+    </div>
+  </div>
+
+  <!-- ===== SCREEN 2: REVIEW ===== -->
+  <div class="screen" id="s2">
+    <div class="topbar">
+      <div class="logo-row">
+        <div class="brand" aria-label="화슐랭 Restroom Rating & Locator"><div class="brand-mark"></div><div><div class="brand-title">화슐랭</div><div class="brand-sub">RESTROOM RATING & LOCATOR</div></div></div>
+        <div class="mypage-btn" onclick="go(4)">👤</div>
+      </div>
+      <div class="search-row"><input class="search-inp" placeholder="🔍  지역명, 장소명으로 검색"></div>
+    </div>
+    <div class="rv-hdr">
+      <div class="back-row" onclick="go(1)"><span class="back-a">‹</span><span style="font-size:13px;color:var(--color-text-secondary)">상세로</span></div>
+      <div style="font-size:14px;font-weight:500;color:var(--color-text-primary)">강남역 지하 공중화장실</div>
+      <div class="star-sel" id="starRow">
+        <span class="star-b" onclick="setStar(1)">★</span>
+        <span class="star-b" onclick="setStar(2)">★</span>
+        <span class="star-b" onclick="setStar(3)">★</span>
+        <span class="star-b" onclick="setStar(4)">★</span>
+        <span class="star-b" onclick="setStar(5)">★</span>
+      </div>
+      <div class="sc-disp" id="scDisp">-.-</div>
+      <div style="text-align:center;font-size:11px;color:var(--color-text-tertiary)">별을 눌러 점수를 선택하세요</div>
+    </div>
+    <div class="cl-sec">
+      <div class="cl-cat">🧹 청결</div>
+      <div class="cl-grid">
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>바닥 청결</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>변기 청결</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>냄새 없음</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>세면대 청결</div>
+      </div>
+      <div class="cl-cat">🧴 비치물품</div>
+      <div class="cl-grid">
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>휴지 있음</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>비데 작동</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>비누 있음</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>핸드드라이어</div>
+      </div>
+      <div class="cl-cat">🔒 시설/보안</div>
+      <div class="cl-grid">
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>도어락 정상</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>조명 양호</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>환기 양호</div>
+        <div class="cl-item" onclick="tog(this)"><div class="cl-dot"></div>안전거울</div>
+      </div>
+    </div>
+    <div class="photo-btn">📷 사진 첨부 (선택)</div>
+    <textarea class="memo-inp" placeholder="특이사항을 남겨주세요 (최대 300자)"></textarea>
+    <div class="sub-row"><button class="sub-btn">리뷰 등록하기</button></div>
+    <div class="bnav">
+      <div class="bnav-item" onclick="go(0)"><span class="bnav-icon">🗺️</span>지도</div>
+      <div class="bnav-item" onclick="go(1)"><span class="bnav-icon">🚽</span>상세</div>
+      <div class="bnav-item on" onclick="go(2)"><span class="bnav-icon">✏️</span>리뷰</div>
+      <div class="bnav-item" onclick="go(3)"><span class="bnav-icon">🏆</span>황금칸</div>
+      <div class="bnav-item" onclick="go(4)"><span class="bnav-icon">👤</span>마이</div>
+    </div>
+  </div>
+
+  <!-- ===== SCREEN 3: GOLDEN ===== -->
+  <div class="screen" id="s3">
+    <div class="topbar">
+      <div class="logo-row">
+        <div class="brand" aria-label="화슐랭 Restroom Rating & Locator"><div class="brand-mark"></div><div><div class="brand-title">화슐랭</div><div class="brand-sub">RESTROOM RATING & LOCATOR</div></div></div>
+        <div class="mypage-btn" onclick="go(4)">👤</div>
+      </div>
+      <div class="search-row"><input class="search-inp" placeholder="🔍  지역명, 장소명으로 검색"></div>
+    </div>
+    <div class="gold-hdr">
+      <div class="gold-title-row">
+        <span style="font-size:20px">🏆</span>
+        <span style="font-size:17px;font-weight:500;color:var(--color-text-primary)">황금 칸</span>
+        <span style="font-size:12px;color:#B45309;background:#FEF3C7;padding:3px 8px;border-radius:8px;margin-left:4px">강남구</span>
+      </div>
+      <div style="font-size:12px;color:var(--color-text-secondary)">오늘의 강남구 추천 · 별점 4.5 이상 엄선</div>
+    </div>
+    <div class="gold-list">
+      <div class="g-card" onclick="go(1)">
+        <div class="g-rank"># 1 · 이번 주 강남구 1위</div>
+        <div class="g-name">강남역 지하 공중화장실</div>
+        <div class="g-meta">서울 강남구 · 280m</div>
+        <div class="g-row"><div class="g-score">4.9</div><div class="g-tags"><span class="g-tag">비데</span><span class="g-tag">24시간</span><span class="g-tag">남녀분리</span></div></div>
+      </div>
+      <div class="g-card">
+        <div class="g-rank"># 2</div>
+        <div class="g-name">코엑스몰 B2 화장실</div>
+        <div class="g-meta">서울 강남구 · 1.2km</div>
+        <div class="g-row"><div class="g-score">4.8</div><div class="g-tags"><span class="g-tag">비데</span><span class="g-tag">기저귀</span><span class="g-tag">장애인칸</span></div></div>
+      </div>
+      <div class="g-card">
+        <div class="g-rank"># 3</div>
+        <div class="g-name">선릉역 2번 출구 화장실</div>
+        <div class="g-meta">서울 강남구 · 1.8km</div>
+        <div class="g-row"><div class="g-score">4.7</div><div class="g-tags"><span class="g-tag">24시간</span><span class="g-tag">청결</span></div></div>
+      </div>
+      <div class="g-card">
+        <div class="g-rank"># 4</div>
+        <div class="g-name">삼성역 공중화장실 B1</div>
+        <div class="g-meta">서울 강남구 · 2.1km</div>
+        <div class="g-row"><div class="g-score">4.6</div><div class="g-tags"><span class="g-tag">비데</span><span class="g-tag">남녀분리</span></div></div>
+      </div>
+      <div class="g-card">
+        <div class="g-rank"># 5</div>
+        <div class="g-name">역삼역 지하 공중화장실</div>
+        <div class="g-meta">서울 강남구 · 2.6km</div>
+        <div class="g-row"><div class="g-score">4.5</div><div class="g-tags"><span class="g-tag">24시간</span><span class="g-tag">청결</span></div></div>
+      </div>
+      <div style="height:14px"></div>
+    </div>
+    <div class="bnav">
+      <div class="bnav-item" onclick="go(0)"><span class="bnav-icon">🗺️</span>지도</div>
+      <div class="bnav-item" onclick="go(1)"><span class="bnav-icon">🚽</span>상세</div>
+      <div class="bnav-item" onclick="go(2)"><span class="bnav-icon">✏️</span>리뷰</div>
+      <div class="bnav-item on" onclick="go(3)"><span class="bnav-icon">🏆</span>황금칸</div>
+      <div class="bnav-item" onclick="go(4)"><span class="bnav-icon">👤</span>마이</div>
+    </div>
+  </div>
+
+  <!-- ===== SCREEN 4: MYPAGE ===== -->
+  <div class="screen" id="s4">
+    <div class="topbar">
+      <div class="logo-row">
+        <div class="brand" aria-label="화슐랭 Restroom Rating & Locator"><div class="brand-mark"></div><div><div class="brand-title">화슐랭</div><div class="brand-sub">RESTROOM RATING & LOCATOR</div></div></div>
+        <div class="mypage-btn" style="background:#FEF0E7;border-color:#E55B26;">👤</div>
+      </div>
+    </div>
+    <div class="mp-scroll">
+      <div class="mp-profile">
+        <div class="mp-avatar">김</div>
+        <div>
+          <div class="mp-name">김화슐랭</div>
+          <div class="mp-sub">가입일 2024.03.12 · 인증 리뷰어</div>
+        </div>
+      </div>
+      <div class="mp-stats">
+        <div class="mp-stat"><div class="mp-stat-n">24</div><div class="mp-stat-l">내가 쓴 리뷰</div></div>
+        <div class="mp-stat"><div class="mp-stat-n">8</div><div class="mp-stat-l">즐겨찾기 장소</div></div>
+      </div>
+      <div class="mp-sec">
+        <div class="mp-sec-t">나의 활동</div>
+        <div class="mp-item">
+          <div class="mp-item-l">
+            <div class="mp-ic">✏️</div>
+            <div><div class="mp-item-name">내가 쓴 후기</div><div class="mp-item-sub">24개의 리뷰</div></div>
+          </div>
+          <span class="mp-arr">›</span>
+        </div>
+        <div class="mp-item">
+          <div class="mp-item-l">
+            <div class="mp-ic">🔍</div>
+            <div><div class="mp-item-name">최근 검색한 화장실</div><div class="mp-item-sub">강남역, 코엑스 외 3곳</div></div>
+          </div>
+          <span class="mp-arr">›</span>
+        </div>
+        <div class="mp-item">
+          <div class="mp-item-l">
+            <div class="mp-ic">📍</div>
+            <div><div class="mp-item-name">최근 방문한 화장실</div><div class="mp-item-sub">오늘 1곳 방문</div></div>
+          </div>
+          <span class="mp-arr">›</span>
+        </div>
+        <div class="mp-item" style="border-bottom:none">
+          <div class="mp-item-l">
+            <div class="mp-ic">📢</div>
+            <div><div class="mp-item-name">제보하기</div><div class="mp-item-sub">새 화장실 정보 등록</div></div>
+          </div>
+          <span class="mp-badge">제보 +P</span>
+        </div>
+      </div>
+    </div>
+    <div class="bnav">
+      <div class="bnav-item" onclick="go(0)"><span class="bnav-icon">🗺️</span>지도</div>
+      <div class="bnav-item" onclick="go(1)"><span class="bnav-icon">🚽</span>상세</div>
+      <div class="bnav-item" onclick="go(2)"><span class="bnav-icon">✏️</span>리뷰</div>
+      <div class="bnav-item" onclick="go(3)"><span class="bnav-icon">🏆</span>황금칸</div>
+      <div class="bnav-item on" onclick="go(4)"><span class="bnav-icon">👤</span>마이</div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+var pins=[
+  {score:'4.8',name:'서초구청 1층 화장실',reviews:'리뷰 64개',dist:'340m',stars:'★★★★★',tags:['24시간','남녀분리']},
+  {score:'4.6',name:'메트로빌딩 화장실 클러스터',reviews:'총 리뷰 92개',dist:'520m',stars:'★★★★☆',tags:['같은 건물 3곳','층별 안내','혼잡도 비교'],building:'메트로빌딩 · 같은 건물 3개 장소',places:[
+    {score:'4.6',name:'메트로빌딩 1F 로비 화장실',meta:'리뷰 44개 · 개방형 · 520m'},
+    {score:'4.2',name:'메트로빌딩 B1 상가 화장실',meta:'리뷰 31개 · 비데 · 540m'},
+    {score:'3.9',name:'메트로빌딩 3F 병원층 화장실',meta:'리뷰 17개 · 남녀분리 · 560m'}
+  ]},
+  {score:'3.6',name:'논현동 공원 화장실',reviews:'리뷰 18개',dist:'1.1km',stars:'★★★☆☆',tags:['24시간']},
+  {score:'4.9',name:'강남역 지하 공중화장실',reviews:'리뷰 128개',dist:'280m',stars:'★★★★★',tags:['비데','24시간','남녀분리']}
+];
+function go(n){
+  document.querySelectorAll('.screen').forEach((s,i)=>s.classList.toggle('active',i===n));
+}
+function showPin(idx){
+  var p=pins[idx];
+  var popup=document.getElementById('pinPopup');
+  document.getElementById('ppScore').textContent=p.score;
+  document.getElementById('ppName').textContent=p.name;
+  document.getElementById('ppReviews').textContent=p.reviews;
+  document.getElementById('ppDist').textContent='· '+p.dist;
+  document.getElementById('ppStars').textContent=p.stars;
+  var tagsEl=document.getElementById('ppTags');
+  tagsEl.innerHTML=p.tags.map(function(t){return '<span class="pp-tag">'+t+'</span>';}).join('');
+  var buildingEl=document.getElementById('ppBuilding');
+  var clusterEl=document.getElementById('clusterList');
+  if(p.places){
+    popup.classList.add('cluster');
+    buildingEl.textContent=p.building;
+    clusterEl.innerHTML=p.places.map(function(place,i){
+      return '<div class="cluster-place" onclick="selectClusterPlace('+idx+','+i+')"><div class="cluster-place-score">'+place.score+'</div><div><div class="cluster-place-name">'+place.name+'</div><div class="cluster-place-meta">'+place.meta+'</div></div><div class="cluster-place-go">›</div></div>';
+    }).join('');
+  }else{
+    popup.classList.remove('cluster');
+    buildingEl.textContent='';
+    clusterEl.innerHTML='';
+  }
+  popup.classList.add('show');
+}
+function selectClusterPlace(pinIdx,placeIdx){
+  var place=pins[pinIdx].places[placeIdx];
+  document.getElementById('ppScore').textContent=place.score;
+  document.getElementById('ppName').textContent=place.name;
+  document.getElementById('ppReviews').textContent=place.meta.split(' · ')[0];
+  document.getElementById('ppDist').textContent='· '+place.meta.split(' · ').slice(-1)[0];
+}
+function closePin(){document.getElementById('pinPopup').classList.remove('show');}
+function chipClick(el){
+  el.closest('.filter-row').querySelectorAll('.chip').forEach(function(c){c.classList.remove('on');});
+  el.classList.add('on');
+}
+function toggleStarFilter(){
+  var m=document.getElementById('starModal');
+  m.classList.toggle('show');
+  document.getElementById('starChip').classList.toggle('on',m.classList.contains('show'));
+}
+function sfClick(el){
+  el.closest('.sf-options').querySelectorAll('.sf-opt').forEach(function(o){o.classList.remove('on');});
+  el.classList.add('on');
+}
+function applyStarFilter(){
+  document.getElementById('starModal').classList.remove('show');
+  document.getElementById('starChip').classList.add('on');
+}
+function setStar(n){
+  var labels=['','별로예요','그저그래요','보통이에요','좋아요','완벽해요!'];
+  document.querySelectorAll('.star-b').forEach(function(s,i){s.classList.toggle('lit',i<n);});
+  document.getElementById('scDisp').textContent=n+'.0  '+labels[n];
+}
+function tog(el){el.classList.toggle('sel');}
+</script>
