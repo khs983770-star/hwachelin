@@ -43,13 +43,43 @@ const SEED_DEMO_TOILETS: ToiletMarkerData[] = [
 export const DEMO_TOILETS: ToiletMarkerData[] =
   CITYHALL_DEMO_TOILETS.length > 0 ? CITYHALL_DEMO_TOILETS : SEED_DEMO_TOILETS;
 
-const DEMO_REVIEWS: Pick<
-  Review,
-  'rating' | 'cleanliness' | 'paper' | 'soap' | 'security' | 'is_verified'
->[] = [
-  { rating: 4.5, cleanliness: true, paper: true, soap: true, security: true, is_verified: true },
-  { rating: 4, cleanliness: true, paper: true, soap: false, security: true, is_verified: true },
-  { rating: 3.5, cleanliness: false, paper: true, soap: true, security: true, is_verified: false },
+const DEMO_REVIEWS: Review[] = [
+  {
+    id: 'demo-review-1',
+    toilet_id: 'demo-seoul-city-hall',
+    user_id: 'demo-user',
+    rating: 4.5,
+    cleanliness: true,
+    paper: true,
+    soap: true,
+    security: true,
+    is_verified: true,
+    created_at: '2026-04-30T00:00:00.000Z',
+  },
+  {
+    id: 'demo-review-2',
+    toilet_id: 'demo-seoul-city-hall',
+    user_id: 'demo-user',
+    rating: 4,
+    cleanliness: true,
+    paper: true,
+    soap: false,
+    security: true,
+    is_verified: true,
+    created_at: '2026-04-30T00:00:00.000Z',
+  },
+  {
+    id: 'demo-review-3',
+    toilet_id: 'demo-seoul-city-hall',
+    user_id: 'demo-user',
+    rating: 3.5,
+    cleanliness: false,
+    paper: true,
+    soap: true,
+    security: true,
+    is_verified: false,
+    created_at: '2026-04-30T00:00:00.000Z',
+  },
 ];
 
 export function getDemoToiletDetail(toiletId: string) {

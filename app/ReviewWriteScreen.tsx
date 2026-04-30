@@ -12,7 +12,7 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { colors } from '../constants/theme';
-import { submitReview } from '../lib/reviewService';
+import { submitReview, updateReview } from '../lib/reviewService';
 import { signInWithKakao } from '../lib/authService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ReviewWrite'>;
@@ -53,10 +53,28 @@ const checklistGroups: { title: string; items: ChecklistItem[] }[] = [
 ];
 
 export default function ReviewWriteScreen({ route, navigation }: Props) {
-  const { toiletId, toiletName, toiletLat, toiletLng } = route.params;
-  const [rating, setRating] = useState(0);
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [memo, setMemo] = useState('');
+  const {
+    toiletId,
+    toiletName,
+    toiletLat,
+    toiletLng,
+    reviewId,
+    initialRating,
+    initialCleanliness,
+    initialPaper,
+    initialSoap,
+    initialSecurity,
+    initialComment,
+  } = route.params;
+  const isEditing = !!reviewId;
+  const [rating, setRating] = useState(initialRating ?? 0);
+  const [selected, setSelected] = useState<Record<string, boolean>>({
+    floor: !!initialCleanliness,
+    paper: !!initialPaper,
+    soap: !!initialSoap,
+    lock: !!initialSecurity,
+  });
+  const [memo, setMemo] = useState(initialComment ?? '');
   const [submitting, setSubmitting] = useState(false);
 
   const selectedCount = useMemo(
@@ -75,8 +93,7 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
     }
 
     setSubmitting(true);
-    const result = await submitReview({
-      toiletId,
+    const reviewPayload = {
       rating,
       // 청결 그룹(바닥·변기·냄새·세면대) 중 하나라도 체크하면 true
       cleanliness: !!(selected.floor || selected.toilet || selected.smell || selected.sink),
@@ -86,9 +103,16 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
       // 시설/보안 그룹 중 하나라도 체크하면 true
       security: !!(selected.lock || selected.light || selected.air || selected.safe),
       comment: memo.trim() || undefined,
-      toiletLat,
-      toiletLng,
-    });
+    };
+    const result =
+      isEditing && reviewId
+        ? await updateReview(reviewId, reviewPayload)
+        : await submitReview({
+            toiletId,
+            ...reviewPayload,
+            toiletLat,
+            toiletLng,
+          });
     setSubmitting(false);
 
     if (!result.ok) {
@@ -117,10 +141,16 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
     }
 
     Alert.alert(
-      result.isVerified ? '✅ 인증된 리뷰로 등록됐어요!' : '리뷰가 등록됐어요!',
-      result.isVerified
-        ? '현재 위치가 화장실 50m 이내로 확인됐어요.'
-        : '리뷰가 저장됐습니다.',
+      isEditing
+        ? '리뷰가 수정됐어요!'
+        : result.isVerified
+          ? '✅ 인증된 리뷰로 등록됐어요!'
+          : '리뷰가 등록됐어요!',
+      isEditing
+        ? '리뷰가 수정됐습니다.'
+        : result.isVerified
+          ? '현재 위치가 화장실 50m 이내로 확인됐어요.'
+          : '리뷰가 저장됐습니다.',
       [{ text: '확인', onPress: () => navigation.goBack() }]
     );
   };
@@ -200,7 +230,7 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
           {submitting ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitText}>리뷰 등록하기</Text>
+            <Text style={styles.submitText}>{isEditing ? '리뷰 수정하기' : '리뷰 등록하기'}</Text>
           )}
         </TouchableOpacity>
       </View>

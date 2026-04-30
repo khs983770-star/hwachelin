@@ -111,3 +111,62 @@ export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
 
   return { ok: true, isVerified };
 }
+
+export async function updateReview(
+  reviewId: string,
+  input: Omit<ReviewInput, 'toiletId' | 'toiletLat' | 'toiletLng'>
+): Promise<SubmitResult> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, reason: 'NOT_LOGGED_IN', message: '로그인이 필요해요' };
+  }
+
+  if (input.comment && containsSensitiveText(input.comment)) {
+    return {
+      ok: false,
+      reason: 'SENSITIVE_TEXT',
+      message: '비밀번호나 민감한 번호는 작성할 수 없어요.\n비밀번호 정보는 선택지 방식으로만 안내해 주세요.',
+    };
+  }
+
+  const { error } = await supabase
+    .from('reviews')
+    .update({
+      rating: input.rating,
+      cleanliness: input.cleanliness,
+      paper: input.paper,
+      soap: input.soap,
+      security: input.security,
+      comment: input.comment?.trim() || null,
+    })
+    .eq('id', reviewId)
+    .eq('user_id', user.id);
+
+  if (error) {
+    return { ok: false, reason: 'DB_ERROR', message: error.message };
+  }
+
+  return { ok: true, isVerified: false };
+}
+
+export type DeleteReviewResult =
+  | { ok: true }
+  | { ok: false; reason: 'NOT_LOGGED_IN' | 'DB_ERROR'; message: string };
+
+export async function deleteReview(reviewId: string): Promise<DeleteReviewResult> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, reason: 'NOT_LOGGED_IN', message: '로그인이 필요해요' };
+  }
+
+  const { error } = await supabase.from('reviews').delete().eq('id', reviewId).eq('user_id', user.id);
+  if (error) {
+    return { ok: false, reason: 'DB_ERROR', message: error.message };
+  }
+
+  return { ok: true };
+}

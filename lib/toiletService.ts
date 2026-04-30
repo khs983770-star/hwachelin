@@ -113,7 +113,7 @@ export async function getToiletDetail(toiletId: string) {
       .single(),
     supabase
       .from('reviews')
-      .select('rating, cleanliness, paper, soap, security, is_verified')
+      .select('id, toilet_id, user_id, rating, cleanliness, paper, soap, security, comment, is_verified, created_at')
       .eq('toilet_id', toiletId),
   ]);
 

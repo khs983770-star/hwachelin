@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,8 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { getToiletDetail } from '../lib/toiletService';
+import { deleteReview } from '../lib/reviewService';
+import { supabase } from '../lib/supabase';
 import { RootStackParamList } from '../types/navigation';
 import { Review } from '../types/toilet';
 import { colors } from '../constants/theme';
@@ -24,6 +27,7 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
   const [detail, setDetail] = useState<ToiletDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const loadDetail = useCallback(async () => {
     const data = await getToiletDetail(toiletId);
@@ -36,8 +40,12 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
 
       (async () => {
         setLoading(true);
-        const data = await getToiletDetail(toiletId);
+        const [{ data: sessionData }, data] = await Promise.all([
+          supabase.auth.getSession(),
+          getToiletDetail(toiletId),
+        ]);
         if (!active) return;
+        setCurrentUserId(sessionData.session?.user.id ?? null);
         setDetail(data);
         setLoading(false);
       })();
@@ -52,6 +60,24 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
     setRefreshing(true);
     await loadDetail();
     setRefreshing(false);
+  };
+
+  const confirmDeleteReview = (reviewId: string) => {
+    Alert.alert('리뷰를 삭제할까요?', '삭제한 리뷰는 되돌릴 수 없습니다.', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: async () => {
+          const result = await deleteReview(reviewId);
+          if (!result.ok) {
+            Alert.alert('삭제 실패', result.message);
+            return;
+          }
+          await loadDetail();
+        },
+      },
+    ]);
   };
 
   if (loading) {
@@ -75,6 +101,7 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
   const place = Array.isArray(detail.places) ? detail.places[0] : detail.places;
   const ratingText = detail.avg_rating != null ? detail.avg_rating.toFixed(1) : '-';
   const reviewCount = detail.review_count ?? 0;
+  const reviews = detail.reviews as Review[];
 
   return (
     <ScrollView
@@ -125,10 +152,10 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
         <Text style={styles.sectionTitle}>리뷰 요약</Text>
         {reviewCount > 0 ? (
           <>
-            <InfoRow label="청결" value={countPositive(detail.reviews, 'cleanliness')} />
-            <InfoRow label="휴지" value={countPositive(detail.reviews, 'paper')} />
-            <InfoRow label="비누" value={countPositive(detail.reviews, 'soap')} />
-            <InfoRow label="안심" value={countPositive(detail.reviews, 'security')} />
+            <InfoRow label="청결" value={countPositive(reviews, 'cleanliness')} />
+            <InfoRow label="휴지" value={countPositive(reviews, 'paper')} />
+            <InfoRow label="비누" value={countPositive(reviews, 'soap')} />
+            <InfoRow label="안심" value={countPositive(reviews, 'security')} />
           </>
         ) : (
           <Text style={styles.mutedText}>아직 리뷰가 없어요. 첫 리뷰를 남겨보세요.</Text>
@@ -149,6 +176,58 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
       >
         <Text style={styles.primaryButtonText}>리뷰 작성하기</Text>
       </TouchableOpacity>
+
+      {reviews.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>리뷰</Text>
+          {reviews.map((review) => {
+            const isMine = currentUserId === review.user_id;
+            return (
+              <View key={review.id} style={styles.reviewCard}>
+                <View style={styles.reviewHeader}>
+                  <Text style={styles.reviewRating}>★ {Number(review.rating).toFixed(1)}</Text>
+                  {isMine && <Text style={styles.myReviewBadge}>내 리뷰</Text>}
+                </View>
+                {!!review.comment && <Text style={styles.reviewComment}>{review.comment}</Text>}
+                <Text style={styles.reviewMeta}>
+                  {review.is_verified ? '현장 인증' : '일반 리뷰'} ·{' '}
+                  {new Date(review.created_at).toLocaleDateString('ko-KR')}
+                </Text>
+                {isMine && (
+                  <View style={styles.reviewActions}>
+                    <TouchableOpacity
+                      style={styles.reviewActionButton}
+                      onPress={() =>
+                        navigation.navigate('ReviewWrite', {
+                          toiletId,
+                          toiletName: place?.name ?? '화장실',
+                          reviewId: review.id,
+                          initialRating: review.rating,
+                          initialCleanliness: review.cleanliness,
+                          initialPaper: review.paper,
+                          initialSoap: review.soap,
+                          initialSecurity: review.security,
+                          initialComment: review.comment ?? '',
+                          toiletLat: place?.lat,
+                          toiletLng: place?.lng,
+                        })
+                      }
+                    >
+                      <Text style={styles.reviewActionText}>수정</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.reviewActionButton, styles.reviewDeleteButton]}
+                      onPress={() => confirmDeleteReview(review.id)}
+                    >
+                      <Text style={[styles.reviewActionText, styles.reviewDeleteText]}>삭제</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -266,6 +345,47 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     alignItems: 'center',
     marginTop: 4,
+    marginBottom: 14,
   },
   primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  reviewCard: {
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderTertiary,
+    backgroundColor: colors.backgroundSecondary,
+    padding: 12,
+    marginBottom: 8,
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  reviewRating: { fontSize: 14, color: colors.amber, fontWeight: '700' },
+  myReviewBadge: {
+    fontSize: 11,
+    color: colors.orange,
+    fontWeight: '700',
+    backgroundColor: '#FFF0E9',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 7,
+  },
+  reviewComment: { fontSize: 13, lineHeight: 19, color: colors.textPrimary, marginBottom: 7 },
+  reviewMeta: { fontSize: 11, color: colors.textTertiary },
+  reviewActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  reviewActionButton: {
+    minWidth: 56,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.backgroundPrimary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSecondary,
+  },
+  reviewDeleteButton: { borderColor: 'rgba(210,65,52,0.35)' },
+  reviewActionText: { fontSize: 12, color: colors.textSecondary, fontWeight: '700' },
+  reviewDeleteText: { color: '#D24134' },
 });
