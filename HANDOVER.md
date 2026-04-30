@@ -296,6 +296,10 @@ GitHub Actions 운영 자동화:
   - `DATA_GO_KR_API_KEY`
   - `EXPO_PUBLIC_SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
+- GitHub repository secrets 3개 등록 완료
+- 수동 실행 검증 완료
+  - Run: `https://github.com/khs983770-star/hwachelin/actions/runs/25145083255`
+  - 결과: `Supabase import 완료: places 276개, toilets 276개, stale public toilets 정리 완료`
 
 ### `scripts/generateCityHallDemoToilets.mjs`
 
