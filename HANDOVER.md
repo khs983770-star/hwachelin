@@ -548,6 +548,8 @@ npm run demo:cityhall -- --count=1000
 - Supabase authorize endpoint 확인 결과: `302`로 `kauth.kakao.com/oauth/authorize` 리다이렉트 확인
 - 기존 `expo-linking` 사용 시 현재 iOS dev client에 네이티브 모듈이 없어 런타임 오류 발생
 - `expo-linking` 의존성을 제거하고 `hwachelin://auth/callback` 고정 redirect + 표준 `URL` 파싱으로 변경 완료
+- 카카오 비즈앱 미등록 상태에서는 `account_email` 동의항목을 사용할 수 없어 OAuth 요청 scope를 `profile_nickname profile_image`로 제한
+- Supabase Kakao Provider의 `Allow users without an email`은 ON 필요
 - 시뮬레이터 앱 재실행 후 런타임 오류 없이 지도 화면 렌더링 확인
 - 남은 검증: 사용자가 시뮬레이터에서 카카오 계정으로 실제 로그인 → 리뷰 작성 → DB `reviews` row 생성 확인
 

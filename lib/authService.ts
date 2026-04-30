@@ -19,6 +19,7 @@ export async function signInWithKakao(): Promise<AuthResult> {
     provider: 'kakao',
     options: {
       redirectTo,
+      scopes: 'profile_nickname profile_image',
       skipBrowserRedirect: true,
     },
   });
@@ -26,7 +27,10 @@ export async function signInWithKakao(): Promise<AuthResult> {
   if (error) return { ok: false, message: error.message };
   if (!data.url) return { ok: false, message: '카카오 로그인 URL을 만들지 못했어요.' };
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  const authUrl = new URL(data.url);
+  authUrl.searchParams.set('scope', 'profile_nickname profile_image');
+
+  const result = await WebBrowser.openAuthSessionAsync(authUrl.toString(), redirectTo);
   if (result.type !== 'success') {
     return { ok: false, message: '로그인이 취소됐어요.' };
   }
