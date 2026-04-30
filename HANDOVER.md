@@ -510,7 +510,7 @@ npm run demo:cityhall -- --count=1000
 - `npm run public-toilets:sync:mcp` 수동 1회 실행 성공
 - `npx tsc --noEmit` 통과
 
-### 5순위: 카카오 로그인 - 앱 구현 완료, Supabase Provider 설정 필요
+### 5순위: 카카오 로그인 - 앱 구현 완료, 실제 로그인 테스트 대기
 
 리뷰 저장과 제보 기능을 제대로 하려면 로그인 필요.
 
@@ -530,22 +530,26 @@ npm run demo:cityhall -- --count=1000
   - `reviews_insert`: `auth.uid() = user_id`
   - `users_insert`: `auth.uid() = id`
 
-필요한 외부 설정:
-1. Supabase Dashboard → Authentication → Providers → Kakao 활성화
+외부 설정:
+1. Supabase Dashboard → Authentication → Providers → Kakao 활성화 완료
    - Kakao REST API Key 입력
-   - Kakao Client Secret은 Kakao Developers에서 사용 설정한 경우에만 입력
+   - Kakao Client Secret 입력
 2. Supabase Dashboard → Authentication → URL Configuration
    - Redirect URL 추가: `hwachelin://auth/callback`
 3. Kakao Developers → 제품 설정 → 카카오 로그인
    - 카카오 로그인 활성화
    - Redirect URI 추가: `https://jdcymglzmcnewgsimatc.supabase.co/auth/v1/callback`
 4. Kakao Developers → 동의항목
-   - 닉네임/profile nickname 동의항목 확인
+   - 닉네임/profile nickname 선택 동의 설정
+   - 프로필 이미지/profile_image 선택 동의 권장
 
 현재 검증 상태:
 - `npx tsc --noEmit` 통과
-- Supabase authorize endpoint 확인 결과: `Unsupported provider: provider is not enabled`
-- 즉, 앱 코드는 준비됐고 Supabase Kakao provider 설정 후 실제 로그인/리뷰 저장 테스트 가능
+- Supabase authorize endpoint 확인 결과: `302`로 `kauth.kakao.com/oauth/authorize` 리다이렉트 확인
+- 기존 `expo-linking` 사용 시 현재 iOS dev client에 네이티브 모듈이 없어 런타임 오류 발생
+- `expo-linking` 의존성을 제거하고 `hwachelin://auth/callback` 고정 redirect + 표준 `URL` 파싱으로 변경 완료
+- 시뮬레이터 앱 재실행 후 런타임 오류 없이 지도 화면 렌더링 확인
+- 남은 검증: 사용자가 시뮬레이터에서 카카오 계정으로 실제 로그인 → 리뷰 작성 → DB `reviews` row 생성 확인
 
 ### 6순위: 화장실 제보 화면
 

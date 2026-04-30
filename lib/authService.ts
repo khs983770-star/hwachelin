@@ -1,5 +1,4 @@
 import { Alert } from 'react-native';
-import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
@@ -11,7 +10,7 @@ export type AuthResult =
   | { ok: false; message: string };
 
 export function getAuthRedirectUrl() {
-  return Linking.createURL('auth/callback');
+  return 'hwachelin://auth/callback';
 }
 
 export async function signInWithKakao(): Promise<AuthResult> {
@@ -32,8 +31,7 @@ export async function signInWithKakao(): Promise<AuthResult> {
     return { ok: false, message: '로그인이 취소됐어요.' };
   }
 
-  const parsed = Linking.parse(result.url);
-  const queryParams = parsed.queryParams ?? {};
+  const queryParams = parseQueryParams(result.url);
   const errorDescription = stringParam(queryParams.error_description ?? queryParams.error);
   if (errorDescription) return { ok: false, message: decodeURIComponent(errorDescription) };
 
@@ -84,4 +82,9 @@ function stringParam(value: unknown) {
   if (Array.isArray(value)) return String(value[0] ?? '') || undefined;
   if (value == null || value === '') return undefined;
   return String(value);
+}
+
+function parseQueryParams(url: string) {
+  const parsed = new URL(url);
+  return Object.fromEntries(parsed.searchParams.entries());
 }
