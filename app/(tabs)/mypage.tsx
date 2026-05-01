@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../constants/theme';
 import { signInWithKakao, signOut } from '../../lib/authService';
 import { getBookmarkCount } from '../../lib/bookmarkService';
+import { deleteAccount } from '../../lib/accountService';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../types/navigation';
 import { ONBOARDING_DONE_KEY } from '../OnboardingScreen';
@@ -192,6 +193,32 @@ export default function MyPage() {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      '회원 탈퇴',
+      '탈퇴하면 작성한 리뷰, 북마크, 제보 내역이 모두 삭제되며 복구할 수 없습니다.\n정말 탈퇴하시겠습니까?',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '탈퇴하기',
+          style: 'destructive',
+          onPress: async () => {
+            setAuthLoading(true);
+            const result = await deleteAccount();
+            setAuthLoading(false);
+
+            if (!result.ok) {
+              Alert.alert('탈퇴 실패', result.message);
+              return;
+            }
+
+            Alert.alert('탈퇴 완료', '계정이 삭제되었습니다. 이용해주셔서 감사합니다.');
+          },
+        },
+      ]
+    );
+  };
+
   const user = session?.user ?? null;
   const displayName =
     user?.user_metadata?.nickname ?? user?.user_metadata?.name ?? user?.email ?? '화슐랭러';
@@ -357,6 +384,17 @@ export default function MyPage() {
           <Text style={styles.versionLabel}>버전</Text>
           <Text style={styles.versionValue}>1.0.0</Text>
         </View>
+
+        {user && (
+          <TouchableOpacity
+            style={styles.deleteAccountBtn}
+            onPress={handleDeleteAccount}
+            disabled={authLoading}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.deleteAccountText}>회원 탈퇴</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
   );
@@ -598,4 +636,14 @@ const styles = StyleSheet.create({
   },
   versionLabel: { fontSize: 14, color: colors.textSecondary },
   versionValue: { fontSize: 13, color: colors.textTertiary },
+  deleteAccountBtn: {
+    marginTop: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  deleteAccountText: {
+    fontSize: 13,
+    color: colors.textTertiary,
+    textDecorationLine: 'underline',
+  },
 });
