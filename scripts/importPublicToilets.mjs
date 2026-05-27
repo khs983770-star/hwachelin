@@ -5,8 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 
 const DATASET_URL = 'https://apis.data.go.kr/1741000/public_restroom_info';
 const LOCALDATA_CSV_URL = 'https://file.localdata.go.kr/file/download/public_restroom_info/info';
-const DEFAULT_REGION = '서울특별시';
-const DEFAULT_LIMIT = 500;
+const DEFAULT_REGION = '';
+const DEFAULT_LIMIT = 30000;
 const PAGE_SIZE = 100;
 
 const env = loadDotEnv('.env.local');
@@ -85,13 +85,13 @@ async function fetchPublicToilets({ serviceKey, region, limit }) {
     }
   } catch (error) {
     console.warn(`${error.message}\nCSV 파일 다운로드 방식으로 전환합니다.`);
-    return fetchPublicToiletCsv({ region, limit });
+    return fetchPublicToiletCsv({ region });
   }
 
   return rows;
 }
 
-async function fetchPublicToiletCsv({ region, limit }) {
+async function fetchPublicToiletCsv({ region }) {
   const response = await fetch(LOCALDATA_CSV_URL, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -107,16 +107,13 @@ async function fetchPublicToiletCsv({ region, limit }) {
   const buffer = Buffer.from(await response.arrayBuffer());
   const text = new TextDecoder('euc-kr').decode(buffer);
   const rows = parseCsv(text);
-  const result = [];
 
-  for (const row of rows) {
+  if (!region) return rows;
+
+  return rows.filter((row) => {
     const address = value(row, ['소재지도로명주소', '소재지지번주소', '도로명주소', '지번주소']);
-    if (region && !String(address).includes(region)) continue;
-    result.push(row);
-    if (result.length >= limit) break;
-  }
-
-  return result;
+    return String(address).includes(region);
+  });
 }
 
 function extractRows(json) {
@@ -150,7 +147,30 @@ function normalizeRows(rows, limit) {
     const placeId = stableUuid(`place:${signature}`);
     const toiletId = stableUuid(`toilet:${signature}`);
     const openTime = value(row, ['개방시간', '이용가능시간', '운영시간']);
+    const openDetail = value(row, ['개방시간상세', '운영시간상세', '이용시간상세']);
     const floor = inferFloor(value(row, ['위치', '설치장소', '소재지시설명', '구분']));
+
+    // 시설 정보 (CSV: '남성용-대변기수', JSON: '남성용대변기수' 등 두 형태 모두 지원)
+    const maleStalls   = toNumber(value(row, ['남성용-대변기수', '남성용대변기수', '남자대변기수']));
+    const maleUrinals  = toNumber(value(row, ['남성용-소변기수', '남성용소변기수', '남자소변기수']));
+    const femaleStalls = toNumber(value(row, ['여성용-대변기수', '여성용대변기수', '여자대변기수']));
+    const disMaleStalls   = toNumber(value(row, ['남성용-장애인용대변기수', '장애인용남성대변기수', '장애인남성대변기수']));
+    const disMaleUrinals  = toNumber(value(row, ['남성용-장애인용소변기수', '장애인용남성소변기수', '장애인남성소변기수']));
+    const disFemaleStalls = toNumber(value(row, ['여성용-장애인용대변기수', '장애인용여성대변기수', '장애인여성대변기수']));
+
+    const disabledAvailable =
+      (disMaleStalls ?? 0) > 0 || (disMaleUrinals ?? 0) > 0 || (disFemaleStalls ?? 0) > 0;
+
+    const diaperRaw = value(row, ['기저귀교환대유무', '기저귀교환대남성화장실', '기저귀교환대남자화장실',
+                                   '기저귀교환대여성화장실', '기저귀교환대여자화장실']);
+    const hasDiaperTable = inferBool(diaperRaw);
+
+    const emergencyBellRaw = value(row, ['비상벨설치여부', '비상벨여부']);
+    const emergencyBell = inferBool(emergencyBellRaw);
+
+    // 운영시간 텍스트 (상세 우선, 없으면 기본)
+    const operatingHours = openDetail || openTime || null;
+    const is24Hours = operatingHours != null && /24/.test(operatingHours);
 
     normalized.push({
       place: {
@@ -169,6 +189,17 @@ function normalizeRows(rows, limit) {
         access_type: inferAccessType(openTime),
         floor,
         gender_type: inferGenderType(row),
+        operating_hours: operatingHours,
+        is_24hours: is24Hours,
+        has_diaper_table: hasDiaperTable,
+        disabled_available: disabledAvailable,
+        emergency_bell: emergencyBell,
+        male_stalls: maleStalls,
+        male_urinals: maleUrinals,
+        female_stalls: femaleStalls,
+        disabled_male_stalls: disMaleStalls,
+        disabled_male_urinals: disMaleUrinals,
+        disabled_female_stalls: disFemaleStalls,
       },
     });
 
@@ -268,6 +299,13 @@ function buildInsertSql(table, columns, rows) {
   ].join('\n');
 }
 
+function inferBool(raw) {
+  if (raw == null || raw === '') return false;
+  const text = String(raw).trim();
+  // Y / 설치 / 있음 / 유 → true
+  return /^(y|yes|설치|있음|유|o|1)$/i.test(text) || Number(text) > 0;
+}
+
 function inferAccessType(openTime) {
   const text = String(openTime ?? '');
   if (text.includes('24')) return '누구나';
@@ -342,8 +380,14 @@ function chunks(items, size) {
 function parseArgs(argv) {
   return argv.reduce((acc, item) => {
     if (!item.startsWith('--')) return acc;
-    const [key, ...rest] = item.slice(2).split('=');
-    acc[key] = rest.join('=') || 'true';
+    const argument = item.slice(2);
+    const equalIndex = argument.indexOf('=');
+    if (equalIndex < 0) {
+      acc[argument] = 'true';
+      return acc;
+    }
+    const key = argument.slice(0, equalIndex);
+    acc[key] = argument.slice(equalIndex + 1);
     return acc;
   }, {});
 }

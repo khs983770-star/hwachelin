@@ -90,6 +90,43 @@ export async function signOut() {
   if (error) Alert.alert('로그아웃 실패', error.message);
 }
 
+/**
+ * 로그인 게이트.
+ * - 이미 로그인되어 있으면 즉시 onAuthed() 실행
+ * - 아니면 "3초 로그인" 팝업 → 카카오 로그인 → 성공 시 onAuthed()
+ *
+ * 사용처: '리뷰 작성하기', '즐겨찾기 저장' 같은 진입 시점.
+ * (실제 제출 단계에서 한 번 더 체크하는 방어 로직은 그대로 유지)
+ */
+export async function requireLogin(opts: {
+  message?: string;
+  onAuthed: () => void;
+}): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    opts.onAuthed();
+    return;
+  }
+  Alert.alert(
+    '로그인이 필요해요',
+    opts.message ?? '리뷰를 남기려면 3초 로그인이 필요해요!',
+    [
+      { text: '다음에', style: 'cancel' },
+      {
+        text: '카카오로 로그인하기',
+        onPress: async () => {
+          const result = await signInWithKakao();
+          if (!result.ok) {
+            Alert.alert('로그인 실패', result.message);
+            return;
+          }
+          opts.onAuthed();
+        },
+      },
+    ]
+  );
+}
+
 export async function ensureUserProfile(user: User) {
   const { data: existingUser, error: selectError } = await supabase
     .from('users')

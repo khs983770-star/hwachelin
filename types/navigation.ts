@@ -8,18 +8,22 @@ export type RootStackParamList = {
   };
   MyBookmarks: undefined;
   MyReviews: undefined;
+  MyReports: undefined;
   ReviewWrite: {
     toiletId: string;
     toiletName?: string;
     reviewId?: string;
     initialRating?: number;
-    initialCleanliness?: boolean;
-    initialPaper?: boolean;
-    initialSoap?: boolean;
-    initialSecurity?: boolean;
-    initialBidet?: boolean;
+    initialCleanlinessLevel?: 'clean' | 'normal' | 'dirty' | null;
+    initialPaper?: boolean | null;
+    initialSoap?: boolean | null;
+    initialHandDryer?: boolean | null;
+    initialHandTissue?: boolean | null;
+    initialBidet?: boolean | null;
+    initialHasPassword?: boolean | null;
+    initialMoodTags?: string[] | null;
+    initialImageUrls?: string[] | null;
     initialComment?: string | null;
-    initialImageUrls?: string[];
     /** GPS 50m 인증용 화장실 좌표 */
     toiletLat?: number;
     toiletLng?: number;
@@ -31,5 +35,6 @@ export type RootStackParamList = {
     lat?: number;
     lng?: number;
     reportType?: 'new_toilet' | 'correction';
+    kakaoPlaceId?: string;
   };
 };

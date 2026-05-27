@@ -5,8 +5,8 @@ const PROJECT_DIR = new URL('..', import.meta.url).pathname;
 const CLAUDE_CONFIG_PATH =
   '/Users/hyunsookim/Library/Application Support/Claude/claude_desktop_config.json';
 
-const region = process.env.PUBLIC_TOILET_REGION ?? '서울특별시';
-const limit = process.env.PUBLIC_TOILET_LIMIT ?? '500';
+const region = process.env.PUBLIC_TOILET_REGION ?? '';
+const limit = process.env.PUBLIC_TOILET_LIMIT ?? '30000';
 
 console.log(`[sync] public toilets sync start: region=${region}, limit=${limit}`);
 

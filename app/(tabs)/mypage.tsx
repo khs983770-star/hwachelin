@@ -18,27 +18,6 @@ import { getBookmarkCount } from '../../lib/bookmarkService';
 import { deleteAccount } from '../../lib/accountService';
 import { supabase } from '../../lib/supabase';
 import { RootStackParamList } from '../../types/navigation';
-import { ONBOARDING_DONE_KEY } from '../OnboardingScreen';
-
-type MyReviewItem = {
-  id: string;
-  toilet_id: string;
-  rating: number;
-  comment: string | null;
-  created_at: string;
-  placeName: string;
-  address: string;
-};
-
-type MyReportItem = {
-  id: string;
-  toilet_id: string | null;
-  report_type: 'new_toilet' | 'correction';
-  place_name: string;
-  address: string | null;
-  status: 'pending' | 'reviewing' | 'approved' | 'rejected';
-  created_at: string;
-};
 
 export default function MyPage() {
   const insets = useSafeAreaInsets();
@@ -49,9 +28,6 @@ export default function MyPage() {
   const [reviewCount, setReviewCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
   const [bookmarkCount, setBookmarkCount] = useState(0);
-  const [myReviews, setMyReviews] = useState<MyReviewItem[]>([]);
-  const [myReports, setMyReports] = useState<MyReportItem[]>([]);
-  const [activityLoading, setActivityLoading] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const loadIsAdmin = useCallback(async (userId: string) => {
@@ -63,127 +39,64 @@ export default function MyPage() {
     setIsAdmin(data?.is_admin === true);
   }, []);
 
-  const loadMyActivity = useCallback(async (userId: string) => {
-    setActivityLoading(true);
-    const [reviewCountRes, reviewListRes, reportCountRes, reportListRes, bCount] = await Promise.all([
-      supabase
-        .from('reviews')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId),
-      supabase
-        .from('reviews')
-        .select(`
-          id,
-          toilet_id,
-          rating,
-          comment,
-          created_at,
-          toilets (
-            id,
-            places (
-              name,
-              address
-            )
-          )
-        `)
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(5),
-      supabase
-        .from('reports')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId),
-      supabase
-        .from('reports')
-        .select('id, toilet_id, report_type, place_name, address, status, created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(5),
+  const loadCounts = useCallback(async (userId: string) => {
+    const [reviewRes, reportRes, bCount] = await Promise.all([
+      supabase.from('reviews').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('reports').select('id', { count: 'exact', head: true }).eq('user_id', userId),
       getBookmarkCount(userId),
     ]);
-
-    setActivityLoading(false);
-
-    if (!reviewCountRes.error) setReviewCount(reviewCountRes.count ?? 0);
-    if (!reportCountRes.error) setReportCount(reportCountRes.count ?? 0);
-    if (!reviewListRes.error) setMyReviews(normalizeReviews(reviewListRes.data ?? []));
-    if (!reportListRes.error) setMyReports((reportListRes.data ?? []) as MyReportItem[]);
+    if (!reviewRes.error) setReviewCount(reviewRes.count ?? 0);
+    if (!reportRes.error) setReportCount(reportRes.count ?? 0);
     setBookmarkCount(bCount);
   }, []);
 
   useEffect(() => {
     let mounted = true;
-
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setSession(data.session);
       if (data.session?.user.id) {
-        loadMyActivity(data.session.user.id);
+        loadCounts(data.session.user.id);
         loadIsAdmin(data.session.user.id);
       }
       setLoading(false);
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       if (nextSession?.user.id) {
-        loadMyActivity(nextSession.user.id);
+        loadCounts(nextSession.user.id);
         loadIsAdmin(nextSession.user.id);
       } else {
-        setReviewCount(0);
-        setReportCount(0);
-        setBookmarkCount(0);
-        setMyReviews([]);
-        setMyReports([]);
-        setIsAdmin(false);
+        setReviewCount(0); setReportCount(0); setBookmarkCount(0); setIsAdmin(false);
       }
     });
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [loadMyActivity, loadIsAdmin]);
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, [loadCounts, loadIsAdmin]);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
-
       (async () => {
         const { data } = await supabase.auth.getSession();
         if (!active) return;
         setSession(data.session);
         if (data.session?.user.id) {
-          await Promise.all([
-            loadMyActivity(data.session.user.id),
-            loadIsAdmin(data.session.user.id),
-          ]);
+          await Promise.all([loadCounts(data.session.user.id), loadIsAdmin(data.session.user.id)]);
         } else {
-          setReviewCount(0);
-          setReportCount(0);
-          setBookmarkCount(0);
-          setMyReviews([]);
-          setMyReports([]);
-          setIsAdmin(false);
+          setReviewCount(0); setReportCount(0); setBookmarkCount(0); setIsAdmin(false);
         }
       })();
-
-      return () => {
-        active = false;
-      };
-    }, [loadMyActivity, loadIsAdmin])
+      return () => { active = false; };
+    }, [loadCounts, loadIsAdmin])
   );
 
   const login = async () => {
     setAuthLoading(true);
     const result = await signInWithKakao();
     setAuthLoading(false);
-
-    if (!result.ok) {
-      Alert.alert('로그인 실패', result.message);
-    }
+    if (!result.ok) Alert.alert('로그인 실패', result.message);
   };
 
   const logout = () => {
@@ -206,12 +119,7 @@ export default function MyPage() {
             setAuthLoading(true);
             const result = await deleteAccount();
             setAuthLoading(false);
-
-            if (!result.ok) {
-              Alert.alert('탈퇴 실패', result.message);
-              return;
-            }
-
+            if (!result.ok) { Alert.alert('탈퇴 실패', result.message); return; }
             Alert.alert('탈퇴 완료', '계정이 삭제되었습니다. 이용해주셔서 감사합니다.');
           },
         },
@@ -226,18 +134,19 @@ export default function MyPage() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top }]}
     >
-      <View style={styles.header}>
+      {/* 타이틀 */}
+      <View style={styles.titleBar}>
         <Text style={styles.title}>마이페이지</Text>
-        <Text style={styles.subtitle}>화슐랭 탐험 기록</Text>
       </View>
 
+      {/* 프로필 */}
       <View style={styles.profile}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{user ? String(displayName).slice(0, 1) : '화'}</Text>
         </View>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.name}>{loading ? '확인 중...' : displayName}</Text>
           <Text style={styles.profileSub}>
             {user ? '카카오 계정으로 로그인됨' : '리뷰를 남기려면 로그인이 필요해요'}
@@ -245,6 +154,7 @@ export default function MyPage() {
         </View>
       </View>
 
+      {/* 로그인/로그아웃 버튼 */}
       <TouchableOpacity
         style={[styles.authButton, user && styles.authButtonSecondary]}
         onPress={user ? logout : login}
@@ -260,80 +170,33 @@ export default function MyPage() {
         )}
       </TouchableOpacity>
 
+      {/* 통계 카드 — 리뷰/북마크/제보 클릭 가능 */}
       <View style={styles.stats}>
-        <StatCard value={String(reviewCount)} label="작성 리뷰" />
-        <StatCard value={String(bookmarkCount)} label="저장 장소" />
-        <StatCard value={String(reportCount)} label="접수 제보" />
+        <TouchableOpacity
+          style={styles.statCard}
+          activeOpacity={user ? 0.8 : 1}
+          onPress={() => user && navigation.navigate('MyReviews')}
+        >
+          <Text style={styles.statValue}>{reviewCount}</Text>
+          <Text style={styles.statLabel}>작성 리뷰</Text>
+        </TouchableOpacity>
+
+        <View style={styles.statCard}>
+          <Text style={styles.statValue}>{bookmarkCount}</Text>
+          <Text style={styles.statLabel}>저장 장소</Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.statCard}
+          activeOpacity={user ? 0.8 : 1}
+          onPress={() => user && navigation.navigate('MyReports')}
+        >
+          <Text style={styles.statValue}>{reportCount}</Text>
+          <Text style={styles.statLabel}>접수 제보</Text>
+        </TouchableOpacity>
       </View>
 
-      {user && (
-        <>
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>내 리뷰</Text>
-              {activityLoading && <ActivityIndicator size="small" color={colors.orange} />}
-            </View>
-            {myReviews.length === 0 ? (
-              <Text style={styles.emptyText}>아직 작성한 리뷰가 없어요.</Text>
-            ) : (
-              myReviews.map((review) => (
-                <TouchableOpacity
-                  key={review.id}
-                  style={styles.activityCard}
-                  onPress={() => navigation.navigate('ToiletDetail', { toiletId: review.toilet_id })}
-                  activeOpacity={0.82}
-                >
-                  <View style={styles.activityHeader}>
-                    <Text style={styles.activityTitle} numberOfLines={1}>
-                      {review.placeName}
-                    </Text>
-                    <Text style={styles.activityScore}>★ {Number(review.rating).toFixed(1)}</Text>
-                  </View>
-                  <Text style={styles.activitySub} numberOfLines={1}>
-                    {review.comment || review.address || '리뷰 메모 없음'}
-                  </Text>
-                  <Text style={styles.activityDate}>{formatDate(review.created_at)}</Text>
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>내 제보</Text>
-            {myReports.length === 0 ? (
-              <Text style={styles.emptyText}>아직 접수한 제보가 없어요.</Text>
-            ) : (
-              myReports.map((report) => (
-                <TouchableOpacity
-                  key={report.id}
-                  style={styles.activityCard}
-                  onPress={() =>
-                    report.toilet_id
-                      ? navigation.navigate('ToiletDetail', { toiletId: report.toilet_id })
-                      : undefined
-                  }
-                  activeOpacity={report.toilet_id ? 0.82 : 1}
-                >
-                  <View style={styles.activityHeader}>
-                    <Text style={styles.activityTitle} numberOfLines={1}>
-                      {report.place_name}
-                    </Text>
-                    <Text style={[styles.statusBadge, getStatusStyle(report.status)]}>
-                      {getStatusLabel(report.status)}
-                    </Text>
-                  </View>
-                  <Text style={styles.activitySub} numberOfLines={1}>
-                    {report.report_type === 'new_toilet' ? '신규 제보' : '수정 제보'} ·{' '}
-                    {report.address || '주소 정보 없음'}
-                  </Text>
-                  <Text style={styles.activityDate}>{formatDate(report.created_at)}</Text>
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
-        </>
-      )}
-
+      {/* 내 활동 메뉴 */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>내 활동</Text>
         <MenuRow
@@ -351,10 +214,11 @@ export default function MyPage() {
           disabled={!user}
         />
         <MenuRow
-          icon="!"
-          title="화장실 제보하기"
+          icon="📍"
+          title="내 제보 내역"
           subtitle="신규 등록과 정보 수정 요청"
-          onPress={() => navigation.navigate('Report', { reportType: 'new_toilet' })}
+          onPress={() => user && navigation.navigate('MyReports')}
+          disabled={!user}
         />
         {isAdmin && (
           <MenuRow
@@ -366,6 +230,7 @@ export default function MyPage() {
         )}
       </View>
 
+      {/* 서비스 정보 */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>서비스 정보</Text>
         <MenuRow
@@ -384,7 +249,6 @@ export default function MyPage() {
           <Text style={styles.versionLabel}>버전</Text>
           <Text style={styles.versionValue}>1.0.0</Text>
         </View>
-
         {user && (
           <TouchableOpacity
             style={styles.deleteAccountBtn}
@@ -400,65 +264,10 @@ export default function MyPage() {
   );
 }
 
-function normalizeReviews(rows: any[]): MyReviewItem[] {
-  return rows.map((row) => {
-    const toilet = Array.isArray(row.toilets) ? row.toilets[0] : row.toilets;
-    const place = Array.isArray(toilet?.places) ? toilet.places[0] : toilet?.places;
-
-    return {
-      id: row.id,
-      toilet_id: row.toilet_id,
-      rating: Number(row.rating),
-      comment: row.comment,
-      created_at: row.created_at,
-      placeName: place?.name ?? '화장실',
-      address: place?.address ?? '',
-    };
-  });
-}
-
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString('ko-KR', {
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-function getStatusLabel(status: MyReportItem['status']) {
-  if (status === 'reviewing') return '검토중';
-  if (status === 'approved') return '승인';
-  if (status === 'rejected') return '반려';
-  return '대기';
-}
-
-function getStatusStyle(status: MyReportItem['status']) {
-  if (status === 'approved') return styles.statusApproved;
-  if (status === 'rejected') return styles.statusRejected;
-  if (status === 'reviewing') return styles.statusReviewing;
-  return styles.statusPending;
-}
-
-function StatCard({ value, label }: { value: string; label: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 function MenuRow({
-  icon,
-  title,
-  subtitle,
-  onPress,
-  disabled,
+  icon, title, subtitle, onPress, disabled,
 }: {
-  icon: string;
-  title: string;
-  subtitle: string;
-  onPress?: () => void;
-  disabled?: boolean;
+  icon: string; title: string; subtitle: string; onPress?: () => void; disabled?: boolean;
 }) {
   return (
     <TouchableOpacity
@@ -480,29 +289,19 @@ function MenuRow({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.backgroundPrimary,
-  },
-  content: {
-    paddingHorizontal: 16,
-    paddingBottom: 32,
-  },
-  header: {
-    paddingBottom: 10,
+  container: { flex: 1, backgroundColor: colors.backgroundPrimary },
+  content: { paddingHorizontal: 16, paddingBottom: 40 },
+
+  titleBar: {
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderTertiary,
+    marginBottom: 4,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 3,
-  },
+  title: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
+
   profile: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -511,6 +310,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderTertiary,
   },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.backgroundTertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { fontSize: 20, color: colors.orange, fontWeight: '700' },
+  name: { fontSize: 16, color: colors.textPrimary, fontWeight: '700' },
+  profileSub: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+
   authButton: {
     height: 44,
     borderRadius: 10,
@@ -526,17 +337,7 @@ const styles = StyleSheet.create({
   },
   authButtonText: { fontSize: 14, color: '#2B1F16', fontWeight: '700' },
   authButtonTextSecondary: { color: colors.textSecondary },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.backgroundTertiary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: { fontSize: 20, color: colors.orange, fontWeight: '700' },
-  name: { fontSize: 16, color: colors.textPrimary, fontWeight: '700' },
-  profileSub: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+
   stats: {
     flexDirection: 'row',
     gap: 8,
@@ -547,19 +348,14 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     backgroundColor: colors.backgroundSecondary,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 12,
+    alignItems: 'flex-start',
   },
-  statValue: { fontSize: 22, color: colors.orange, fontWeight: '700' },
-  statLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  section: { marginTop: 14 },
-  sectionHeader: {
-    minHeight: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
+  statValue: { fontSize: 28, color: colors.orange, fontWeight: '800' },
+  statLabel: { fontSize: 13, color: colors.textSecondary, marginTop: 3 },
+
+  section: { marginTop: 20 },
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',
@@ -567,46 +363,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: 0.3,
   },
-  emptyText: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 10,
-    padding: 12,
-  },
-  activityCard: {
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderTertiary,
-    backgroundColor: colors.backgroundSecondary,
-    padding: 12,
-    marginBottom: 8,
-  },
-  activityHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 5,
-  },
-  activityTitle: { flex: 1, fontSize: 14, color: colors.textPrimary, fontWeight: '700' },
-  activityScore: { fontSize: 12, color: colors.amber, fontWeight: '700' },
-  activitySub: { fontSize: 12, color: colors.textSecondary },
-  activityDate: { fontSize: 11, color: colors.textTertiary, marginTop: 6 },
-  statusBadge: {
-    minWidth: 44,
-    textAlign: 'center',
-    overflow: 'hidden',
-    borderRadius: 7,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  statusPending: { color: '#92400E', backgroundColor: '#FEF3C7' },
-  statusReviewing: { color: colors.blue, backgroundColor: '#DBEAFE' },
-  statusApproved: { color: colors.green, backgroundColor: '#D1FAE5' },
-  statusRejected: { color: '#D24134', backgroundColor: '#FEE2E2' },
+
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -628,6 +385,7 @@ const styles = StyleSheet.create({
   menuTitle: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
   menuSubtitle: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
   menuArrow: { fontSize: 18, color: colors.textTertiary },
+
   versionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -636,11 +394,7 @@ const styles = StyleSheet.create({
   },
   versionLabel: { fontSize: 14, color: colors.textSecondary },
   versionValue: { fontSize: 13, color: colors.textTertiary },
-  deleteAccountBtn: {
-    marginTop: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
+  deleteAccountBtn: { marginTop: 8, paddingVertical: 12, alignItems: 'center' },
   deleteAccountText: {
     fontSize: 13,
     color: colors.textTertiary,

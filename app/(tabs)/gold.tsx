@@ -14,6 +14,7 @@ import {
 } from '../../lib/goldContext';
 import { RootStackParamList } from '../../types/navigation';
 import { ToiletMarkerData } from '../../types/toilet';
+import { getOperatingStatus } from '../../lib/operatingHours';
 
 interface RankedToilet extends ToiletMarkerData {
   goldScore: number;
@@ -119,6 +120,31 @@ export default function GoldScreen() {
             activeOpacity={0.84}
             onPress={() => navigation.navigate('ToiletDetail', { toiletId: toilet.toilet_id })}
           >
+            {(() => {
+              const operatingStatus = getOperatingStatus({
+                operatingHours: toilet.operating_hours,
+                is24Hours: toilet.is_24hours,
+              });
+              return (
+                <View
+                  style={[
+                    styles.statusBadge,
+                    operatingStatus.state === 'open' && styles.statusBadgeOpen,
+                    operatingStatus.state === 'closed' && styles.statusBadgeClosed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      operatingStatus.state === 'open' && styles.statusBadgeTextOpen,
+                      operatingStatus.state === 'closed' && styles.statusBadgeTextClosed,
+                    ]}
+                  >
+                    {operatingStatus.label}
+                  </Text>
+                </View>
+              );
+            })()}
             <View style={styles.rankRow}>
               <Text style={styles.rank}># {index + 1}</Text>
               <Text style={styles.goldScore}>황금점수 {toilet.goldScore.toFixed(2)}</Text>
@@ -213,6 +239,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   topCard: { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 7,
+    backgroundColor: colors.backgroundSecondary,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    marginBottom: 6,
+  },
+  statusBadgeOpen: { backgroundColor: '#E9F8EF' },
+  statusBadgeClosed: { backgroundColor: '#F3F4F6' },
+  statusBadgeText: { fontSize: 10, color: colors.textTertiary, fontWeight: '800' },
+  statusBadgeTextOpen: { color: '#15803D' },
+  statusBadgeTextClosed: { color: '#4B5563' },
   rankRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rank: { fontSize: 11, fontWeight: '700', color: '#B45309', marginBottom: 5 },
   goldScore: { fontSize: 11, color: colors.textTertiary, fontWeight: '600' },

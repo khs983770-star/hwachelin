@@ -3,9 +3,10 @@ import {
   View,
   StyleSheet,
   ActivityIndicator,
+  Keyboard,
   Text,
   TouchableOpacity,
-  TextInput,
+  TouchableWithoutFeedback,
   ScrollView,
 } from 'react-native';
 import MapView, { Marker, Region, PROVIDER_DEFAULT } from 'react-native-maps';
@@ -13,26 +14,40 @@ import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { getToiletsInRegion } from '../../lib/toiletService';
+import { getToiletsInRegion, getToiletsInBounds, findToiletNear, getToiletMarkerById } from '../../lib/toiletService';
 import { ToiletMarkerData } from '../../types/toilet';
 import ToiletBottomSheet from '../../components/ToiletBottomSheet';
 import { RootStackParamList } from '../../types/navigation';
 import KakaoMapView, { KakaoMapViewRef } from '../../components/KakaoMapView';
+import SearchBar, { SearchSuggestionList } from '../../components/SearchBar';
+import ClusterBottomSheet from '../../components/ClusterBottomSheet';
+import NoToiletSheet from '../../components/NoToiletSheet';
+import CustomMarker from '../../components/CustomMarker';
 import { colors } from '../../constants/theme';
 import { setGoldContextSnapshot } from '../../lib/goldContext';
+import { PlaceSearchResult, isAreaSearch } from '../../lib/searchService';
+import { requireLogin } from '../../lib/authService';
+import { useSearch } from '../../hooks/useSearch';
+import {
+  addOperatingState,
+  filterToilets,
+  FILTER_OPTIONS,
+  hasDemoToilets,
+  STAR_FILTER,
+  URGENT_FILTER,
+  getUrgentToilets,
+} from '../../lib/mapToiletFilters';
+import {
+  clampFetchRadius,
+  DEFAULT_CENTER,
+  getAppleRegionBounds,
+  getAppleRegionRadiusKm,
+  MapBounds,
+  MapViewport,
+  normalizeFetchRadius,
+} from '../../lib/mapViewport';
 
-const DEFAULT_LAT = 37.5665;
-const DEFAULT_LNG = 126.978;
-const STAR_FILTER = '별점';
-const FILTER_OPTIONS = [
-  { label: '전체', enabled: true },
-  { label: '24시간', enabled: true },
-  { label: '비데', enabled: true },
-  { label: '개방형', enabled: true },
-  { label: '기저귀', enabled: true },
-  { label: '남녀분리', enabled: true },
-  { label: STAR_FILTER, enabled: true },
-] as const;
+const INITIAL_LOCATION_TIMEOUT_MS = 8000;
 
 export default function MapScreen() {
   const kakaoMapRef = useRef<KakaoMapViewRef>(null);
@@ -40,139 +55,262 @@ export default function MapScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialLocationResolved, setInitialLocationResolved] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mapErrorMsg, setMapErrorMsg] = useState<string | null>(null);
   const [toilets, setToilets] = useState<ToiletMarkerData[]>([]);
   const [selectedToilet, setSelectedToilet] = useState<ToiletMarkerData | null>(null);
+  const [clusterToilets, setClusterToilets] = useState<ToiletMarkerData[]>([]);
+  const [clusterCenter, setClusterCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [toiletLoading, setToiletLoading] = useState(false);
-  const [mapCenter, setMapCenter] = useState({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
-  const [selectedFilter, setSelectedFilter] = useState('전체');
-  const [searchQuery, setSearchQuery] = useState('');
-  const isShowingDemoData = toilets.some(
-    (toilet) =>
-      toilet.toilet_id.startsWith('demo-') ||
-      toilet.name.includes('시청역 데모') ||
-      toilet.address.includes('데모로')
-  );
+  const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
+  const [visibleBounds, setVisibleBounds] = useState<MapBounds | null>(null);
+  const [showResearchButton, setShowResearchButton] = useState(false);
+  const mapCenterRef = useRef(DEFAULT_CENTER);
+  const lastFetchedCenterRef = useRef(DEFAULT_CENTER);
+  const lastFetchedBoundsRef = useRef<MapBounds | null>(null);
+  const mapFetchRadiusRef = useRef(normalizeFetchRadius());
+  const visibleBoundsRef = useRef<MapBounds | null>(null);
+  const toiletLoadingRef = useRef(false);
+  // 선택된 필터 목록 (빈 배열 = '전체' 상태)
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
+  const [searchMode, setSearchMode] = useState<'local' | 'place'>('local');
+  const [selectedPlace, setSelectedPlace] = useState<PlaceSearchResult | null>(null);
+  const [noToiletPlace, setNoToiletPlace] = useState<PlaceSearchResult | null>(null);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const isSearchFocusedRef = useRef(false);
+  const initialFetchDoneRef = useRef(false);
+  const search = useSearch(mapCenter, toilets);
+  const isShowingDemoData = hasDemoToilets(toilets);
   const insets = useSafeAreaInsets();
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const filteredToilets = useMemo(() => {
-    return toilets.filter((toilet) => {
-      const searchableText = [
-        toilet.name,
-        toilet.address,
-        toilet.type,
-        toilet.access_type,
-        toilet.floor,
-        toilet.gender_type,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      const matchesSearch =
-        normalizedSearchQuery.length === 0 || searchableText.includes(normalizedSearchQuery);
+  const normalizedSearchQuery =
+    searchMode === 'local' ? search.query.trim().toLowerCase() : '';
+  // 급해요 모드 여부
+  const urgentMode = selectedFilters.includes(URGENT_FILTER);
 
-      let matchesFilter = true;
-      if (selectedFilter === '개방형') {
-        matchesFilter = toilet.access_type === '누구나';
-      } else if (selectedFilter === '남녀분리') {
-        matchesFilter = toilet.gender_type === '남녀분리';
-      } else if (selectedFilter === STAR_FILTER) {
-        matchesFilter = (toilet.avg_rating ?? 0) >= 4.3;
-      } else if (selectedFilter === '24시간') {
-        matchesFilter = toilet.is_24hours === true;
-      } else if (selectedFilter === '비데') {
-        // 리뷰 50% 이상이 비데 체크한 경우
-        matchesFilter = (toilet.bidet_rate ?? 0) >= 0.5;
-      } else if (selectedFilter === '기저귀') {
-        matchesFilter = toilet.has_diaper_table === true;
-      }
+  const filteredToilets = useMemo(
+    () => filterToilets(toilets, normalizedSearchQuery, selectedFilters),
+    [normalizedSearchQuery, selectedFilters, toilets]
+  );
 
-      return matchesSearch && matchesFilter;
-    });
-  }, [normalizedSearchQuery, selectedFilter, toilets]);
-  const hasActiveSearchOrFilter = normalizedSearchQuery.length > 0 || selectedFilter !== '전체';
-  const countLabel =
-    filteredToilets.length > 0
-      ? hasActiveSearchOrFilter
-        ? `검색 결과 ${filteredToilets.length}개`
-        : `${isShowingDemoData ? '데모 ' : ''}화장실 ${filteredToilets.length}개`
-      : hasActiveSearchOrFilter
+  // 급해요 모드: 내 위치 기준 가장 가까운 Top 3
+  const urgentToilets = useMemo(() => {
+    if (!urgentMode || !location) return null;
+    return getUrgentToilets(filteredToilets, location, 3);
+  }, [urgentMode, location, filteredToilets]);
+
+  // 지도에 표시할 화장실 (급해요 모드면 Top 3만)
+  const mapToilets = useMemo(
+    () => addOperatingState(urgentToilets ?? filteredToilets),
+    [filteredToilets, urgentToilets]
+  );
+
+  // 급해요 순위 맵 (toilet_id → rank)
+  const urgentRanks = useMemo<Record<string, number>>(() => {
+    if (!urgentToilets) return {};
+    return Object.fromEntries(urgentToilets.map((t) => [t.toilet_id, t.rank]));
+  }, [urgentToilets]);
+
+  const hasActiveSearchOrFilter = normalizedSearchQuery.length > 0 || selectedFilters.length > 0;
+  const searchContextLabel = selectedPlace?.name ?? search.query;
+  const searchDropdownOpen =
+    isSearchFocused &&
+    ((search.query.trim().length === 0 &&
+      (search.recentKeywords.length > 0 || search.trendingKeywords.length > 0)) ||
+      (search.query.trim().length > 0 &&
+        (search.results.length > 0 || search.status === 'empty' || search.status === 'error')));
+  const searchVisibleItems = search.results.slice(0, 8);
+  const showRecentSearches = isSearchFocused && search.query.trim().length === 0;
+  const isShowingStaleResults = showResearchButton;
+  const visibleResultCount = mapToilets.length;
+  const countLabel = urgentMode
+    ? visibleResultCount > 0
+      ? `🚨 가까운 화장실 Top ${visibleResultCount}`
+      : '🚨 근처 화장실이 없어요'
+    : visibleResultCount > 0
+      ? hasActiveSearchOrFilter || selectedPlace
+        ? `검색 결과 ${visibleResultCount}개`
+        : `${isShowingDemoData ? '데모 ' : ''}화장실 ${visibleResultCount}개`
+      : hasActiveSearchOrFilter || selectedPlace
         ? '조건에 맞는 화장실 없음'
-      : '주변 화장실 없음';
+        : '주변 화장실 없음';
+  const countBadgeTop =
+    insets.top +
+    (searchDropdownOpen ? 242 : 190);
 
   useEffect(() => {
     setGoldContextSnapshot({
       center: mapCenter,
       toilets: filteredToilets,
-      searchQuery,
-      selectedFilter,
+      searchQuery: searchContextLabel,
+      selectedFilter: selectedFilters.length === 0 ? '전체' : selectedFilters.join(', '),
     });
-  }, [filteredToilets, mapCenter, searchQuery, selectedFilter]);
+  }, [mapCenter, searchContextLabel, selectedFilters, filteredToilets]);
 
-  // 현재 지도 중심 기준으로 화장실 조회
-  const fetchToilets = useCallback(async (lat: number, lng: number) => {
-    setToiletLoading(true);
-    const data = await getToiletsInRegion(lat, lng, 3);
-    setToilets(data);
-    setSelectedToilet((current) =>
-      current ? data.find((toilet) => toilet.toilet_id === current.toilet_id) ?? current : null
-    );
-    setToiletLoading(false);
+  const shouldShowResearchButton = useCallback((currentBounds: MapBounds | null) => {
+    const fetchedBounds = lastFetchedBoundsRef.current;
+    if (!fetchedBounds || !currentBounds) return false;
+
+    // 1. 현재 뷰포트가 마지막 fetch 범위를 벗어났을 때
+    const outOfBounds =
+      currentBounds.north > fetchedBounds.north ||
+      currentBounds.south < fetchedBounds.south ||
+      currentBounds.east > fetchedBounds.east ||
+      currentBounds.west < fetchedBounds.west;
+
+    if (outOfBounds) return true;
+
+    // 2. 현재 뷰포트 면적이 마지막 fetch 범위의 25% 이하일 때
+    // (줌아웃 후 재탐색 → 다시 줌인하면 fetch 범위 안에 있어도 버튼 표시)
+    const fetchedArea =
+      (fetchedBounds.north - fetchedBounds.south) *
+      (fetchedBounds.east - fetchedBounds.west);
+    const currentArea =
+      (currentBounds.north - currentBounds.south) *
+      (currentBounds.east - currentBounds.west);
+
+    return currentArea / fetchedArea < 0.25;
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchToilets(mapCenter.lat, mapCenter.lng);
-    }, [fetchToilets, mapCenter.lat, mapCenter.lng])
-  );
+  // 현재 지도 중심 기준으로 화장실 조회 (bounds 있으면 뷰포트 범위 사용)
+  const fetchToilets = useCallback(async (lat: number, lng: number, radiusKm?: number, bounds?: MapBounds) => {
+    toiletLoadingRef.current = true;
+    setToiletLoading(true);
+    try {
+      let data;
+      if (bounds) {
+        data = await getToiletsInBounds(bounds.south, bounds.west, bounds.north, bounds.east);
+      } else {
+        const fetchRadiusKm =
+          typeof radiusKm === 'number'
+            ? clampFetchRadius(radiusKm)
+            : clampFetchRadius(mapFetchRadiusRef.current);
+        mapFetchRadiusRef.current = fetchRadiusKm;
+        data = await getToiletsInRegion(lat, lng, fetchRadiusKm);
+      }
+      setToilets(data);
+      mapCenterRef.current = { lat, lng };
+      lastFetchedCenterRef.current = { lat, lng };
+      lastFetchedBoundsRef.current = bounds ?? visibleBoundsRef.current;
+      setMapCenter({ lat, lng });
+      setShowResearchButton(false);
+      setSelectedToilet((current) =>
+        current ? data.find((toilet) => toilet.toilet_id === current.toilet_id) ?? current : null
+      );
+    } catch (error) {
+      console.warn('화장실 조회 실패:', error);
+    } finally {
+      toiletLoadingRef.current = false;
+      setToiletLoading(false);
+    }
+  }, []);
 
-  // 위치 권한 + 초기 위치 가져오기
+  const fetchInitialDeviceLocation = useCallback(async () => {
+    const lastKnown = await Location.getLastKnownPositionAsync({
+      maxAge: 1000 * 60 * 10,
+      requiredAccuracy: 3000,
+    });
+    if (lastKnown) return lastKnown;
+
+    return Promise.race([
+      Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('위치 조회 시간 초과')), INITIAL_LOCATION_TIMEOUT_MS);
+      }),
+    ]);
+  }, []);
+
+  // 위치 권한 + 초기 위치 가져오기 (fetchToilets는 visibleBounds 준비 후 별도 useEffect에서 실행)
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 5000);
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          setErrorMsg('위치 권한이 필요해요');
-          setLoading(false);
-          clearTimeout(timer);
+          mapCenterRef.current = DEFAULT_CENTER;
+          lastFetchedCenterRef.current = DEFAULT_CENTER;
+          setMapCenter(DEFAULT_CENTER);
           return;
         }
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        const loc = await fetchInitialDeviceLocation();
         const lat = loc.coords.latitude;
         const lng = loc.coords.longitude;
         setLocation({ lat, lng });
+        mapCenterRef.current = { lat, lng };
         setMapCenter({ lat, lng });
-        fetchToilets(lat, lng);
       } catch (e) {
         console.log('위치 가져오기 실패, 기본 위치 사용');
-        fetchToilets(DEFAULT_LAT, DEFAULT_LNG);
+        mapCenterRef.current = DEFAULT_CENTER;
+        lastFetchedCenterRef.current = DEFAULT_CENTER;
+        setMapCenter(DEFAULT_CENTER);
       } finally {
-        clearTimeout(timer);
+        setInitialLocationResolved(true);
         setLoading(false);
       }
     })();
-  }, []);
+  }, [fetchInitialDeviceLocation]);
 
-  // 지도 이동 완료 시 새 영역 화장실 로드 (디바운스)
+  // 지도 렌더 후 visibleBounds가 준비되면 첫 조회를 bounds 기반으로 실행
+  useEffect(() => {
+    if (!initialLocationResolved) return;
+    if (!visibleBounds) return;
+    if (initialFetchDoneRef.current) return;
+    initialFetchDoneRef.current = true;
+    const center = mapCenterRef.current;
+    fetchToilets(center.lat, center.lng, undefined, visibleBounds);
+  }, [initialLocationResolved, visibleBounds, fetchToilets]);
+
+  // 다른 화면(제보 등)에서 돌아올 때 지도 데이터 갱신
+  useFocusEffect(
+    useCallback(() => {
+      if (!initialFetchDoneRef.current) return;
+      const bounds = lastFetchedBoundsRef.current;
+      const center = lastFetchedCenterRef.current;
+      if (bounds) {
+        fetchToilets(center.lat, center.lng, undefined, bounds);
+      } else {
+        fetchToilets(center.lat, center.lng);
+      }
+    }, [fetchToilets])
+  );
+
+  // 지도 이동 완료 시에는 조회하지 않고 재탐색 필요 여부만 표시
   const regionChangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onRegionChangeComplete = useCallback(
-    (region: { lat: number; lng: number }) => {
+    (region: MapViewport) => {
+      const nextCenter = { lat: region.lat, lng: region.lng };
+      mapCenterRef.current = nextCenter;
+      mapFetchRadiusRef.current = normalizeFetchRadius(region.radiusKm ?? mapFetchRadiusRef.current);
+      if (region.bounds) {
+        setVisibleBounds(region.bounds);
+        visibleBoundsRef.current = region.bounds;
+      }
+      if (isSearchFocusedRef.current) {
+        Keyboard.dismiss();
+        isSearchFocusedRef.current = false;
+        setIsSearchFocused(false);
+      }
       if (regionChangeTimer.current) clearTimeout(regionChangeTimer.current);
       regionChangeTimer.current = setTimeout(() => {
-        setMapCenter(region);
-        fetchToilets(region.lat, region.lng);
+        mapCenterRef.current = nextCenter;
+        setMapCenter(nextCenter);
+        if (!toiletLoadingRef.current) {
+          setShowResearchButton(shouldShowResearchButton(visibleBoundsRef.current));
+        }
       }, 600);
     },
-    [fetchToilets]
+    [shouldShowResearchButton]
   );
 
   const onAppleRegionChangeComplete = useCallback(
     (region: Region) => {
-      onRegionChangeComplete({ lat: region.latitude, lng: region.longitude });
+      onRegionChangeComplete({
+        lat: region.latitude,
+        lng: region.longitude,
+        radiusKm: getAppleRegionRadiusKm(region),
+        bounds: getAppleRegionBounds(region),
+      });
     },
     [onRegionChangeComplete]
   );
@@ -184,6 +322,22 @@ export default function MapScreen() {
     );
     if (!selectedStillVisible) setSelectedToilet(null);
   }, [filteredToilets, selectedToilet]);
+
+  // 급해요 모드 활성화 시 → Top 3 + 내 위치가 모두 보이도록 자동 줌
+  useEffect(() => {
+    if (!urgentMode || !urgentToilets || urgentToilets.length === 0) return;
+    const points = urgentToilets.map((t) => ({ lat: t.lat, lng: t.lng }));
+    if (location) points.push(location);
+    // Apple Maps 폴백
+    if (mapErrorMsg && appleMapRef.current) {
+      appleMapRef.current.fitToCoordinates(
+        points.map((p) => ({ latitude: p.lat, longitude: p.lng })),
+        { edgePadding: { top: 80, right: 40, bottom: 120, left: 40 }, animated: true }
+      );
+    } else {
+      kakaoMapRef.current?.fitPoints(points, 0.15);
+    }
+  }, [urgentMode, urgentToilets, location, mapErrorMsg]);
 
   const goToMyLocation = () => {
     if (!location) return;
@@ -199,8 +353,39 @@ export default function MapScreen() {
       kakaoMapRef.current?.moveTo(location.lat, location.lng);
     }
 
+    mapCenterRef.current = location;
     setMapCenter(location);
     fetchToilets(location.lat, location.lng);
+  };
+
+  const researchCurrentRegion = () => {
+    const nextCenter = mapCenterRef.current;
+    const bounds = visibleBoundsRef.current;
+    closeClusterSheet();
+    setSelectedToilet(null);
+    setSelectedPlace(null);
+    fetchToilets(nextCenter.lat, nextCenter.lng, undefined, bounds ?? undefined);
+  };
+
+  const closeClusterSheet = () => {
+    setClusterToilets([]);
+    setClusterCenter(null);
+    setNoToiletPlace(null);
+  };
+
+  const selectToiletFromCluster = (toilet: ToiletMarkerData) => {
+    closeClusterSheet();
+    setSelectedToilet(toilet);
+    setSelectedPlace(null);
+    mapCenterRef.current = { lat: toilet.lat, lng: toilet.lng };
+    setMapCenter({ lat: toilet.lat, lng: toilet.lng });
+    kakaoMapRef.current?.moveTo(toilet.lat, toilet.lng);
+    appleMapRef.current?.animateToRegion({
+      latitude: toilet.lat,
+      longitude: toilet.lng,
+      latitudeDelta: 0.006,
+      longitudeDelta: 0.006,
+    });
   };
 
   const zoomIn = () => {
@@ -219,8 +404,82 @@ export default function MapScreen() {
     kakaoMapRef.current?.zoomOut();
   };
 
-  const lat = location?.lat ?? DEFAULT_LAT;
-  const lng = location?.lng ?? DEFAULT_LNG;
+  const selectPlaceResult = async (place: PlaceSearchResult) => {
+    Keyboard.dismiss();
+    closeClusterSheet();
+    setNoToiletPlace(null);
+    setSearchMode('place');
+    search.setQuery(place.name);
+    search.saveSelectedPlace(place);
+    setSelectedPlace(place);
+
+    // 지도 이동 (공통)
+    mapCenterRef.current = { lat: place.lat, lng: place.lng };
+    setMapCenter({ lat: place.lat, lng: place.lng });
+    kakaoMapRef.current?.moveTo(place.lat, place.lng);
+    appleMapRef.current?.animateToRegion({
+      latitude: place.lat,
+      longitude: place.lng,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    });
+
+    // ── 지역 탐색 (지하철역·행정구역 등) ──────────────────────────────
+    // kakaoPlaceId 또는 toiletId가 있으면 특정 장소 → 지역 탐색 제외
+    const isSpecificVenue = !!place.kakaoPlaceId || !!place.toiletId;
+    if (!isSpecificVenue && isAreaSearch(place.categoryGroupCode)) {
+      setSelectedToilet(null);
+      fetchToilets(place.lat, place.lng);
+      return;
+    }
+
+    // ── 특정 장소 탐색 ─────────────────────────────────────────────────
+    // 1) toiletId가 있으면 로컬 캐시 → DB 순서로 직접 조회
+    if (place.toiletId) {
+      const localMatch = toilets.find((t) => t.toilet_id === place.toiletId) ?? null;
+      const toilet = localMatch ?? await getToiletMarkerById(place.toiletId);
+      if (toilet) {
+        setSelectedToilet(toilet);
+        fetchToilets(toilet.lat, toilet.lng);
+        return;
+      }
+    }
+
+    // 2) DB에서 근접 화장실 조회 (대형 시설은 반경 확대)
+    const LARGE_VENUE_KEYWORDS = ['백화점', '쇼핑', '공항', '대학', '대형마트'];
+    const searchRadius = LARGE_VENUE_KEYWORDS.some((kw) => place.category.includes(kw)) ? 150 : 80;
+    const nearby = await findToiletNear(place.lat, place.lng, searchRadius);
+    if (nearby) {
+      setSelectedToilet(nearby);
+      // 마커도 지도에 보이도록 재조회
+      fetchToilets(place.lat, place.lng);
+      return;
+    }
+
+    // 3) 화장실 정보 없음 → 안내 시트
+    setSelectedToilet(null);
+    fetchToilets(place.lat, place.lng);
+    setNoToiletPlace(place);
+  };
+
+  const selectKeyword = (keyword: string) => {
+    closeClusterSheet();
+    search.setQuery(keyword);
+    setSearchMode('local');
+    setSelectedPlace(null);
+    setSelectedToilet(null);
+  };
+
+  const clearSearch = () => {
+    closeClusterSheet();
+    search.clearQuery();
+    setSearchMode('local');
+    setSelectedPlace(null);
+    setNoToiletPlace(null);
+  };
+
+  const lat = mapCenter.lat;
+  const lng = mapCenter.lng;
 
   if (errorMsg) {
     return (
@@ -239,7 +498,7 @@ export default function MapScreen() {
         </View>
       )}
 
-      {mapErrorMsg ? (
+      {!initialLocationResolved ? null : mapErrorMsg ? (
         <MapView
           ref={appleMapRef}
           style={styles.map}
@@ -253,20 +512,29 @@ export default function MapScreen() {
           showsUserLocation
           showsMyLocationButton={false}
           onRegionChangeComplete={onAppleRegionChangeComplete}
-          onPress={() => setSelectedToilet(null)}
+          onPress={() => {
+            setSelectedToilet(null);
+            closeClusterSheet();
+          }}
         >
-          {filteredToilets.map((toilet) => (
+          {mapToilets.map((toilet) => (
             <Marker
               key={toilet.toilet_id}
               coordinate={{ latitude: toilet.lat, longitude: toilet.lng }}
+              anchor={{ x: 0.5, y: 1 }}
+              tracksViewChanges={selectedToilet?.toilet_id === toilet.toilet_id}
               onPress={(event) => {
                 event.stopPropagation();
+                closeClusterSheet();
                 setSelectedToilet(toilet);
               }}
             >
-              <View style={styles.markerContainer}>
-                <Text style={styles.markerEmoji}>🚻</Text>
-              </View>
+              <CustomMarker
+                rating={toilet.avg_rating}
+                hasToiletInfo={(toilet.review_count ?? 0) > 0 || toilet.avg_rating != null}
+                isSelected={selectedToilet?.toilet_id === toilet.toilet_id}
+                rank={urgentRanks[toilet.toilet_id] ?? null}
+              />
             </Marker>
           ))}
         </MapView>
@@ -275,9 +543,23 @@ export default function MapScreen() {
           ref={kakaoMapRef}
           center={{ lat, lng }}
           currentLocation={location}
-          toilets={filteredToilets}
-          onMapPress={() => setSelectedToilet(null)}
-          onMarkerPress={setSelectedToilet}
+          toilets={mapToilets}
+          selectedToiletId={selectedToilet?.toilet_id ?? null}
+          urgentRanks={urgentRanks}
+          onMapPress={() => {
+            setSelectedToilet(null);
+            closeClusterSheet();
+          }}
+          onMarkerPress={(toilet) => {
+            closeClusterSheet();
+            setSelectedToilet(toilet);
+          }}
+          onClusterPress={(items, center) => {
+            setSelectedToilet(null);
+            setSelectedPlace(null);
+            setClusterToilets(items);
+            setClusterCenter(center);
+          }}
           onRegionIdle={onRegionChangeComplete}
           onMapError={(message) => {
             console.warn('[KakaoMapView]', message);
@@ -296,10 +578,12 @@ export default function MapScreen() {
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.logoRow}>
-          <View>
-            <Text style={styles.logo}>
-              화슐랭 <Text style={styles.logoSub}>Hwa-chelin</Text>
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={styles.logoIcon}>✿</Text>
+            <View>
+              <Text style={styles.logo}>화슐랭</Text>
+              <Text style={styles.logoSub}>HWA-CHELIN</Text>
+            </View>
           </View>
           <TouchableOpacity
             style={styles.profileButton}
@@ -309,55 +593,150 @@ export default function MapScreen() {
             <Text style={styles.profileButtonText}>👤</Text>
           </TouchableOpacity>
         </View>
-        <TextInput
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="🔍  지역명, 장소명으로 검색"
-          placeholderTextColor={colors.textTertiary}
-          style={styles.searchInput}
-          returnKeyType="search"
+        <SearchBar
+          query={search.query}
+          onChangeQuery={(query) => {
+            closeClusterSheet();
+            search.setQuery(query);
+            setSearchMode('local');
+            setSelectedPlace(null);
+          }}
+          results={search.results}
+          recentKeywords={search.recentKeywords}
+          trendingKeywords={search.trendingKeywords}
+          status={search.status}
+          errorMessage={search.errorMessage}
+          isLoading={search.isLoading}
+          onSelectPlace={selectPlaceResult}
+          onSelectKeyword={selectKeyword}
+          onDeleteRecentKeyword={search.deleteRecentKeyword}
+          onClearRecentKeywords={search.clearRecentKeywords}
+          onClear={clearSearch}
+          onRetry={search.retry}
+          renderDropdown={false}
+          dropdownOpen={searchDropdownOpen}
+          onFocusChange={(focused) => {
+            isSearchFocusedRef.current = focused;
+            setIsSearchFocused(focused);
+          }}
         />
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filterRow}
         >
-          {FILTER_OPTIONS.map((filter) => (
-            <TouchableOpacity
-              key={filter.label}
-              style={[
-                filter.label === STAR_FILTER ? styles.starChip : styles.filterChip,
-                selectedFilter === filter.label &&
-                  (filter.label === STAR_FILTER ? styles.starChipOn : styles.filterChipOn),
-                !filter.enabled && styles.filterChipDisabled,
-              ]}
-              onPress={() => {
-                if (filter.enabled) setSelectedFilter(filter.label);
-              }}
-              activeOpacity={filter.enabled ? 0.8 : 1}
-              disabled={!filter.enabled}
-            >
-              <Text
+          {FILTER_OPTIONS.map((filter) => {
+            const isAll = filter.label === '전체';
+            const isStar = filter.label === STAR_FILTER;
+            const isUrgent = filter.label === URGENT_FILTER;
+            const isActive = isAll
+              ? selectedFilters.length === 0
+              : selectedFilters.includes(filter.label);
+
+            const chipStyle = isUrgent
+              ? styles.urgentChip
+              : isStar
+                ? styles.starChip
+                : styles.filterChip;
+            const chipOnStyle = isUrgent
+              ? styles.urgentChipOn
+              : isStar
+                ? styles.starChipOn
+                : styles.filterChipOn;
+            const textStyle = isUrgent
+              ? styles.urgentChipText
+              : isStar
+                ? styles.starChipText
+                : styles.filterChipText;
+            const textOnStyle = isUrgent
+              ? styles.urgentChipTextOn
+              : isStar
+                ? styles.starChipTextOn
+                : styles.filterChipTextOn;
+
+            return (
+              <TouchableOpacity
+                key={filter.label}
                 style={[
-                  filter.label === STAR_FILTER ? styles.starChipText : styles.filterChipText,
-                  selectedFilter === filter.label &&
-                    (filter.label === STAR_FILTER ? styles.starChipTextOn : styles.filterChipTextOn),
-                  !filter.enabled && styles.filterChipTextDisabled,
+                  chipStyle,
+                  isActive && chipOnStyle,
+                  !filter.enabled && styles.filterChipDisabled,
                 ]}
+                onPress={() => {
+                  if (!filter.enabled) return;
+                  setSelectedFilters((prev) => {
+                    if (isAll) return []; // 전체: 모두 해제
+                    if (prev.includes(filter.label)) {
+                      // 이미 선택된 것 해제
+                      return prev.filter((f) => f !== filter.label);
+                    }
+                    // 새로 추가
+                    return [...prev, filter.label];
+                  });
+                }}
+                activeOpacity={filter.enabled ? 0.8 : 1}
+                disabled={!filter.enabled}
               >
-                {filter.label === STAR_FILTER ? '★ 별점' : filter.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[
+                    textStyle,
+                    isActive && textOnStyle,
+                    !filter.enabled && styles.filterChipTextDisabled,
+                  ]}
+                >
+                  {isStar ? '★ 별점' : filter.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
+
+      {searchDropdownOpen && (
+        <>
+          <TouchableWithoutFeedback onPress={() => {
+            Keyboard.dismiss();
+            isSearchFocusedRef.current = false;
+            setIsSearchFocused(false);
+          }}>
+            <View style={styles.searchBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={[styles.searchDropdownOverlay, { top: insets.top + 108 }]}>
+            <SearchSuggestionList
+              keyword={search.query.trim()}
+              showRecent={showRecentSearches}
+              visibleItems={searchVisibleItems}
+              recentKeywords={search.recentKeywords}
+              trendingKeywords={search.trendingKeywords}
+              status={search.status}
+              errorMessage={search.errorMessage}
+              onRetry={search.retry}
+              onSelectPlace={(place) => {
+                isSearchFocusedRef.current = false;
+                setIsSearchFocused(false);
+                selectPlaceResult(place);
+              }}
+              onSelectKeyword={selectKeyword}
+              onDeleteRecentKeyword={search.deleteRecentKeyword}
+              onClearRecentKeywords={search.clearRecentKeywords}
+              attached
+              onClose={() => {
+                Keyboard.dismiss();
+                isSearchFocusedRef.current = false;
+                setIsSearchFocused(false);
+              }}
+            />
+          </View>
+        </>
+
+      )}
 
       {/* 화장실 수 표시 배지 */}
       {!loading && (
         <View
           style={[
             styles.countBadge,
-            { top: insets.top + 140 },
+            { top: countBadgeTop },
             isShowingDemoData && styles.demoCountBadge,
           ]}
         >
@@ -371,16 +750,40 @@ export default function MapScreen() {
         </View>
       )}
 
+      {!loading && showResearchButton && !searchDropdownOpen && (
+        <TouchableOpacity
+          style={[styles.researchButton, { top: countBadgeTop + 54 }]}
+          onPress={researchCurrentRegion}
+          activeOpacity={0.86}
+          disabled={toiletLoading}
+        >
+          {toiletLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.researchButtonText}>이 지역에서 재탐색</Text>
+          )}
+        </TouchableOpacity>
+      )}
+
       {/* 내 위치 버튼 */}
       <TouchableOpacity
-        style={[styles.locationButton, { bottom: selectedToilet ? 260 : insets.bottom + 96 }]}
+        style={[
+          styles.locationButton,
+          { bottom: selectedToilet || clusterToilets.length > 0 ? 260 : insets.bottom + 96 },
+        ]}
         onPress={goToMyLocation}
         activeOpacity={0.85}
       >
-        <Text style={styles.locationButtonText}>⦿</Text>
+        <Text style={styles.locationButtonIcon}>⦿</Text>
+        <Text style={styles.locationButtonLabel}>내 위치</Text>
       </TouchableOpacity>
 
-      <View style={[styles.zoomControl, { bottom: selectedToilet ? 318 : insets.bottom + 150 }]}>
+      <View
+        style={[
+          styles.zoomControl,
+          { bottom: selectedToilet || clusterToilets.length > 0 ? 318 : insets.bottom + 150 },
+        ]}
+      >
         <TouchableOpacity style={styles.zoomButton} onPress={zoomIn} activeOpacity={0.85}>
           <Text style={styles.zoomButtonText}>+</Text>
         </TouchableOpacity>
@@ -398,10 +801,53 @@ export default function MapScreen() {
           setSelectedToilet(null);
           navigation.navigate('ToiletDetail', { toiletId: t.toilet_id });
         }}
+        onReviewPress={(t) => {
+          setSelectedToilet(null);
+          requireLogin({
+            onAuthed: () => {
+              navigation.navigate('ReviewWrite', {
+                toiletId: t.toilet_id,
+                toiletName: t.name,
+                toiletLat: t.lat,
+                toiletLng: t.lng,
+              });
+            },
+          });
+        }}
+        userLocation={location}
+      />
+      <ClusterBottomSheet
+        toilets={clusterToilets}
+        center={clusterCenter ?? mapCenter}
+        userLocation={location}
+        onClose={closeClusterSheet}
+        onSelectToilet={selectToiletFromCluster}
+        onDetailPress={(toilet) => {
+          closeClusterSheet();
+          navigation.navigate('ToiletDetail', { toiletId: toilet.toilet_id });
+        }}
+      />
+      <NoToiletSheet
+        place={noToiletPlace}
+        onClose={() => setNoToiletPlace(null)}
+        onShowNearby={() => setNoToiletPlace(null)}
+        onRegister={() => {
+          if (!noToiletPlace) return;
+          setNoToiletPlace(null);
+          navigation.navigate('Report', {
+            placeName: noToiletPlace.name,
+            address: noToiletPlace.roadAddress || noToiletPlace.address,
+            lat: noToiletPlace.lat,
+            lng: noToiletPlace.lng,
+            reportType: 'new_toilet',
+            kakaoPlaceId: noToiletPlace.kakaoPlaceId,
+          });
+        }}
       />
     </View>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.backgroundSecondary },
@@ -413,62 +859,74 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 8,
-    backgroundColor: 'rgba(255,253,251,0.96)',
+    backgroundColor: 'rgba(255,253,251,0.98)',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderTertiary,
-    paddingHorizontal: 14,
-    paddingBottom: 10,
+    borderBottomColor: 'rgba(232,220,215,0.64)',
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    shadowColor: '#4A1A1F',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  searchBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 11,
+  },
+  searchDropdownOverlay: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    zIndex: 12,
   },
   logoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  logoIcon: {
+    fontSize: 25,
+    color: colors.orange,
+    marginRight: 6,
   },
   logo: {
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 22,
+    fontWeight: '900',
     color: colors.orange,
-    letterSpacing: -0.3,
+    letterSpacing: 0,
+    lineHeight: 24,
   },
   logoSub: {
-    fontSize: 13,
-    color: colors.textTertiary,
-    fontWeight: '400',
+    fontSize: 10,
+    color: colors.orange,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    lineHeight: 12,
   },
   profileButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.backgroundSecondary,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFF4F6',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSecondary,
+    borderColor: '#F8CDD5',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  profileButtonText: { fontSize: 16 },
-  searchInput: {
-    height: 36,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSecondary,
-    backgroundColor: colors.backgroundPrimary,
-    paddingHorizontal: 13,
-    fontSize: 13,
-    color: colors.textPrimary,
-    marginBottom: 8,
-  },
+  profileButtonText: { fontSize: 19 },
   filterRow: {
-    gap: 6,
-    paddingRight: 14,
+    gap: 10,
+    paddingRight: 20,
   },
   filterChip: {
-    height: 25,
-    paddingHorizontal: 10,
-    borderRadius: 12,
+    height: 36,
+    paddingHorizontal: 15,
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSecondary,
-    backgroundColor: colors.backgroundPrimary,
+    borderColor: '#E8DCD7',
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -479,22 +937,38 @@ const styles = StyleSheet.create({
   filterChipDisabled: {
     opacity: 0.42,
   },
-  filterChipText: { fontSize: 11, color: colors.textSecondary, fontWeight: '500' },
+  filterChipText: { fontSize: 13, color: colors.textSecondary, fontWeight: '700' },
   filterChipTextOn: { color: '#fff' },
   filterChipTextDisabled: { color: colors.textTertiary },
   starChip: {
-    height: 25,
-    paddingHorizontal: 10,
-    borderRadius: 12,
+    height: 36,
+    paddingHorizontal: 13,
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.amber,
     backgroundColor: '#FEF3C7',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  starChipText: { fontSize: 11, color: '#92400E', fontWeight: '600' },
+  starChipText: { fontSize: 13, color: colors.orange, fontWeight: '800' },
   starChipOn: { backgroundColor: colors.amber, borderColor: colors.amber },
   starChipTextOn: { color: '#fff' },
+  urgentChip: {
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: '#E50914',
+    backgroundColor: '#FFF0F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  urgentChipOn: {
+    backgroundColor: '#E50914',
+    borderColor: '#E50914',
+  },
+  urgentChipText: { fontSize: 13, color: '#E50914', fontWeight: '800' },
+  urgentChipTextOn: { color: '#fff' },
   loadingOverlay: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,
@@ -541,64 +1015,87 @@ const styles = StyleSheet.create({
   countBadge: {
     position: 'absolute',
     alignSelf: 'center',
-    backgroundColor: 'rgba(255,253,251,0.94)',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 3,
-    minWidth: 100,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 22,
+    shadowColor: '#4A1A1F',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    elevation: 6,
+    minWidth: 124,
     alignItems: 'center',
   },
-  countText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
+  countText: { fontSize: 14, color: colors.textPrimary, fontWeight: '900' },
   demoCountBadge: { borderWidth: StyleSheet.hairlineWidth, borderColor: '#FFB08A' },
+  researchButton: {
+    position: 'absolute',
+    alignSelf: 'center',
+    minWidth: 164,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.orange,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    shadowColor: '#4A1A1F',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 7,
+  },
+  researchButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '900',
+  },
   locationButton: {
     position: 'absolute',
-    right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    right: 22,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: colors.backgroundPrimary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 5,
+    gap: 1,
+    shadowColor: '#4A1A1F',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 7,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSecondary,
   },
-  locationButtonText: { fontSize: 18, color: colors.textSecondary, fontWeight: '700' },
+  locationButtonIcon: { fontSize: 18, color: '#6C554F', fontWeight: '900', lineHeight: 20 },
+  locationButtonLabel: { fontSize: 9, fontWeight: '700', color: '#6C554F', letterSpacing: -0.2 },
   zoomControl: {
     position: 'absolute',
-    right: 20,
-    width: 44,
-    borderRadius: 22,
+    right: 22,
+    width: 52,
+    borderRadius: 26,
     backgroundColor: colors.backgroundPrimary,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowColor: '#4A1A1F',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 7,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSecondary,
   },
   zoomButton: {
-    width: 44,
-    height: 40,
+    width: 52,
+    height: 49,
     alignItems: 'center',
     justifyContent: 'center',
   },
   zoomButtonText: {
-    fontSize: 24,
-    lineHeight: 26,
-    color: colors.textPrimary,
-    fontWeight: '600',
+    fontSize: 30,
+    lineHeight: 32,
+    color: '#7A5B52',
+    fontWeight: '500',
   },
   zoomDivider: {
     height: StyleSheet.hairlineWidth,

@@ -18,6 +18,7 @@ import {
   removeBookmark,
 } from '../lib/bookmarkService';
 import { RootStackParamList } from '../types/navigation';
+import ScreenHeader from '../components/ScreenHeader';
 
 export default function MyBookmarksScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -61,11 +62,12 @@ export default function MyBookmarksScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        { paddingBottom: insets.bottom + 24 },
+    <View style={styles.container}>
+      <ScreenHeader title="저장한 장소" onBack={() => navigation.goBack()} />
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + 24 },
       ]}
     >
       {loading ? (
@@ -142,7 +144,8 @@ export default function MyBookmarksScreen() {
           ))}
         </>
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 

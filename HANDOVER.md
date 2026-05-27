@@ -1,8 +1,9 @@
 # 화슐랭 프로젝트 인수인계 문서
 
-> 최종 업데이트: 2026-04-29  
-> 현재 작업 도구: Codex + Xcode iOS Simulator  
-> 프로젝트 위치: `~/IdeaProjects/hwachelin`
+> 최종 업데이트: 2026-05-07 (3차)  
+> 프로젝트 위치: `~/IdeaProjects/hwachelin`  
+> Supabase 프로젝트: `jdcymglzmcnewgsimatc`  
+> EAS 프로젝트: `69783862-edb0-41fb-aa5b-9cdc11bb498a`
 
 ---
 
@@ -11,8 +12,9 @@
 **앱 이름:** 화슐랭 (화장실 + 미슐랭)  
 **목적:** 위치 기반 깨끗한 화장실 찾기 + 사용자 리뷰/평점 앱  
 **플랫폼:** iOS / Android (React Native + Expo)  
-**기획서:** Notion `화슐랭 기획안`, page ID `3517e16a-6a35-8045-811b-c8b3ff3d7ddf`  
-**UI 참고 시안:** `file:///Users/hyunsookim/Downloads/hwachelin_v2.html`
+**기획서:** Notion `화슐랭 상세 기획서` — https://www.notion.so/3527e16a6a3581ed8adbfb7cfa9cf63b  
+**번들 ID:** `com.hwachelin.app`  
+**버전:** 1.0.0 (buildNumber: 1, versionCode: 1)
 
 ---
 
@@ -22,11 +24,13 @@
 |------|------|
 | 앱 프레임워크 | Expo 54 + React Native 0.81 + TypeScript |
 | 내비게이션 | React Navigation Bottom Tabs + Native Stack |
-| 지도 | 카카오맵 JavaScript SDK WebView 우선, Apple Maps fallback |
+| 지도 | 카카오맵 JavaScript SDK WebView, Apple Maps fallback |
 | 위치 | `expo-location` |
-| DB/백엔드 | Supabase PostgreSQL |
-| 로그인 | 카카오 OAuth 예정, 아직 미구현 |
-| 장소 검색 | 카카오 Local API 예정, 아직 미구현 |
+| DB/백엔드 | Supabase PostgreSQL + PostGIS |
+| 로그인 | 카카오 OAuth 2.0 (PKCE) + `expo-web-browser` |
+| 스토리지 | Supabase Storage (`reviews/` 버킷) |
+| 빌드/배포 | EAS Build (프로덕션 프로파일 설정 완료) |
+| 공공데이터 | data.go.kr API + CSV fallback |
 
 ---
 
@@ -38,20 +42,14 @@ cd ~/IdeaProjects/hwachelin
 # Metro 개발 서버
 npx expo start --localhost --clear --port 8081
 
-# iOS Development Build
-LANG=en_US.UTF-8 npx expo run:ios --device "iPhone 16 Pro"
+# iOS 시뮬레이터 위치 고정 (서울시청)
+xcrun simctl location booted set 37.5665,126.9780
 
 # 이미 빌드된 개발 클라이언트로 다시 열기
 xcrun simctl openurl booted 'com.hwachelin.app://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081'
 ```
 
-시뮬레이터 위치를 서울시청으로 고정:
-
-```bash
-xcrun simctl location booted set 37.5665,126.9780
-```
-
-Pod install이 필요하면 UTF-8 환경으로 실행:
+Pod install이 필요하면:
 
 ```bash
 cd ios
@@ -59,597 +57,477 @@ LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 pod install
 cd ..
 ```
 
+EAS 프로덕션 빌드:
+
+```bash
+eas build --platform ios --profile production
+eas build --platform android --profile production
+```
+
 ---
 
 ## 4. 환경 변수
 
-`.env.local`에 아래 값이 있음. 실제 값은 로컬 파일을 기준으로 확인.
+`.env.local`에 아래 값이 있음.
 
 ```bash
-EXPO_PUBLIC_SUPABASE_URL=...
+EXPO_PUBLIC_SUPABASE_URL=https://jdcymglzmcnewgsimatc.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=...
-EXPO_PUBLIC_KAKAO_APP_KEY=...
+EXPO_PUBLIC_KAKAO_APP_KEY=...        # 카카오맵 JavaScript 키
+EXPO_PUBLIC_KAKAO_REST_API_KEY=...   # Kakao Local keyword search REST API 키
 ```
 
-카카오맵 설정 현재 상태:
+카카오 설정:
 - Kakao Developers 앱: `화슐랭`
-- Web 플랫폼 도메인 등록 완료:
-  - `http://localhost:8081`
-  - `http://127.0.0.1:8081`
-- 카카오맵 API 사용 설정 ON 완료
-- SDK 요청 `200 OK` 확인 완료
+- Web 플랫폼 도메인: `http://localhost:8081`, `http://127.0.0.1:8081`
+- Redirect URI: `https://jdcymglzmcnewgsimatc.supabase.co/auth/v1/callback`
+- 동의항목: `profile_nickname`, `profile_image`
+- 비즈앱 미등록 → `account_email` scope 제외
 
 ---
 
-## 5. 현재 프로젝트 구조
+## 5. 프로젝트 구조
 
 ```text
 hwachelin/
-├── App.tsx
+├── App.tsx                          # React Navigation 루트 + 온보딩 첫 실행 감지
+├── app.json                         # Expo 설정 (iOS Privacy Manifest 포함)
+├── eas.json                         # EAS Build 프로파일 (development/preview/production)
 ├── app/
-│   ├── ReviewWriteScreen.tsx
-│   ├── ToiletDetailScreen.tsx
+│   ├── OnboardingScreen.tsx         # 4슬라이드 온보딩 (AsyncStorage ONBOARDING_DONE_KEY로 첫 실행 시에만 표시)
+│   ├── AdminScreen.tsx              # 제보 승인/반려 어드민 (is_admin 유저 전용)
+│   ├── PolicyScreen.tsx             # 개인정보처리방침 / 이용약관 WebView
+│   ├── ReviewWriteScreen.tsx        # 리뷰 작성/수정
+│   ├── ToiletDetailScreen.tsx       # 화장실 상세
+│   ├── ReportScreen.tsx             # 화장실 제보
+│   ├── MyReviewsScreen.tsx          # 내가 평가한 화장실 전체 목록
+│   ├── MyBookmarksScreen.tsx        # 저장한 장소 목록
+│   ├── MyReportsScreen.tsx          # 내 제보 내역 목록 (status 확인 가능)
 │   └── (tabs)/
-│       ├── gold.tsx
-│       ├── index.tsx
-│       └── mypage.tsx
+│       ├── index.tsx                # 지도 탭 (메인)
+│       ├── gold.tsx                 # 황금칸 탭
+│       └── mypage.tsx               # 마이페이지 탭
 ├── components/
-│   ├── KakaoMapView.tsx
-│   └── ToiletBottomSheet.tsx
+│   ├── KakaoMapView.tsx             # 카카오맵 WebView 래퍼
+│   ├── SearchBar.tsx                # 네이버맵형 장소 검색 자동완성 UI
+│   ├── CustomMarker.tsx             # react-native-maps fallback용 커스텀 화장실 핀
+│   ├── ClusterBottomSheet.tsx       # 클러스터 마커 탭 시 화장실 목록 바텀시트
+│   ├── ToiletBottomSheet.tsx        # 마커 탭 바텀시트
+│   ├── ScreenHeader.tsx             # 공통 백버튼 헤더 (useSafeAreaInsets 대응)
+│   ├── ToiletIcon.tsx               # View 기반 변기 아이콘 (마커/바텀시트/클러스터 통일)
+│   ├── MarkerPinIcon.tsx            # 지도 마커핀과 동일한 모양의 View 컴포넌트 (온보딩/UI용)
+│   ├── HwachelinStars.tsx           # 꽃(✿) 마크 평점 UI — 부분 채움 지원 (0.5단위)
+│   └── NoToiletSheet.tsx            # 검색 장소 화장실 미등록 시 안내 + 제보 유도 바텀시트
 ├── constants/
-│   └── theme.ts
+│   └── theme.ts                     # 공통 색상/radius 상수
 ├── lib/
-│   ├── cityhallDemoToilets.ts
-│   ├── demoToilets.ts
-│   ├── supabase.ts
-│   └── toiletService.ts
-├── scripts/
-│   ├── generateCityHallDemoToilets.mjs
-│   └── importPublicToilets.mjs
+│   ├── supabase.ts                  # Supabase 클라이언트 (PKCE flowType)
+│   ├── toiletService.ts             # 화장실 조회 (toilets_near RPC + fallback)
+│   ├── reviewService.ts             # 리뷰 CRUD
+│   ├── reportService.ts             # 제보 insert
+│   ├── bookmarkService.ts           # 북마크 CRUD
+│   ├── authService.ts               # 카카오 로그인/로그아웃
+│   ├── searchService.ts             # Kakao Local keyword search API + isAreaSearch() 인텐트 감지
+│   ├── operatingHours.ts            # 운영시간 파싱 / 영업 상태 계산
+│   ├── mapViewport.ts               # 지도 bounds/radius/viewport 유틸
+│   ├── mapToiletFilters.ts          # 지도 필터/운영상태/데모 데이터 유틸
+│   ├── goldContext.ts               # 황금칸 컨텍스트 snapshot (지도↔황금칸 탭 bounds 공유)
+│   ├── demoToilets.ts               # 개발용 데모 화장실 데이터
+│   ├── cityhallDemoToilets.ts       # 시청역 데모 화장실 데이터 (CITYHALL_DEMO_TOILETS)
+│   └── accountService.ts            # 회원 탈퇴 (Edge Function 호출)
+├── hooks/
+│   └── useSearch.ts                 # 검색 debounce/abort/recent/trending/filter/ranking
 ├── types/
-│   ├── navigation.ts
-│   └── toilet.ts
-└── ios/
+│   ├── navigation.ts                # RootStackParamList
+│   └── toilet.ts                    # ToiletMarkerData 등
+├── docs/                            # GitHub Pages (개인정보처리방침/이용약관)
+│   ├── index.html
+│   ├── privacy-policy/index.html
+│   └── terms-of-service/index.html
+└── supabase/
+    └── functions/
+        ├── delete-account/          # 회원 탈퇴 Edge Function
+        └── sync-public-toilets/     # 공공데이터 싱크 Edge Function
 ```
-
-`app/_layout.tsx`와 `app/(tabs)/_layout.tsx`는 expo-router용 파일이지만 현재 앱 실행 경로에서는 미사용. 실제 네비게이션은 `App.tsx`의 React Navigation이 담당.
 
 ---
 
-## 6. 현재 구현 상태
+## 6. Supabase DB 스키마
 
-### 완료
-
-- Expo + TypeScript 프로젝트 세팅
-- iOS Development Build 및 iPhone 16 Pro 시뮬레이터 실행 확인
-- New Architecture 활성화
-- Supabase 클라이언트 연결
-- DB 조회 서비스:
-  - `getToiletsInRegion()`
-  - `getToiletDetail()`
-- Supabase 데이터가 비어 있을 때 개발용 시청역 데모 화장실 1000개 fallback
-- 카카오맵 WebView 지도 표시
-- 카카오맵 실패 시 Apple Maps fallback
-- 지도 화면 UI v2 반영:
-  - 브랜드 상단바
-  - 검색창
-  - 필터 칩
-  - 평점형 지도 핀
-  - 마커 클러스터링
-  - 지도 줌 `+ / -` 버튼
-  - 현재 위치 버튼
-- 마커 선택 바텀시트
-- 화장실 상세 화면
-- 리뷰 작성 화면 UI
-  - 별점 선택
-  - 체크리스트
-  - 사진 첨부 자리
-  - 메모 입력
-  - 제출 안내
-- 황금칸 탭
-  - 현재는 데모 화장실을 평점순으로 표시
-- 마이페이지 기본 UI
-- `npx tsc --noEmit` 통과 확인
-
-### 아직 데모/임시 상태
-
-- 실제 Supabase `places`, `toilets`, `reviews` 데이터는 아직 비어 있을 수 있음
-- DB 조회 결과가 없으면 앱은 `lib/cityhallDemoToilets.ts`의 시청역 근처 로컬 데모 1000개를 표시함
-- 리뷰 작성 화면은 저장 API 연결 전
-- 황금칸은 실제 랭킹 데이터가 아니라 데모 데이터
-- 검색창과 필터 칩은 UI만 있고 실제 필터링/검색 미연결
-- 사진 첨부 버튼은 UI만 있음
-- 공공데이터 import 스크립트는 준비됐지만 `DATA_GO_KR_API_KEY`가 아직 없음
-- 시청역 근처 임시 데모 1000개 SQL 생성됨:
-  - import: `tmp/cityhall-demo-import.sql`
-  - cleanup: `tmp/cityhall-demo-cleanup.sql`
-
----
-
-## 7. 주요 파일 설명
-
-### `App.tsx`
-
-React Navigation 루트.
-- Bottom Tabs: `지도`, `황금칸`, `마이페이지`
-- Stack Screens: `ToiletDetail`, `ReviewWrite`
-
-### `app/(tabs)/index.tsx`
-
-메인 지도 화면.
-- 현재 위치 권한 요청
-- 위치 기준 화장실 조회
-- 카카오맵 WebView 표시
-- 카카오맵 실패 시 Apple Maps fallback
-- 검색/필터 UI
-- 마커 선택 시 `ToiletBottomSheet` 표시
-
-### `components/KakaoMapView.tsx`
-
-카카오맵 JS SDK를 WebView로 로드.
-- RN → WebView 메시지:
-  - `SET_MARKERS`
-  - `SET_CURRENT_LOCATION`
-  - `MOVE_TO`
-- WebView → RN 메시지:
-  - `MAP_READY`
-  - `MARKER_PRESS`
-  - `MAP_PRESS`
-  - `MAP_IDLE`
-  - `ERROR`
-- 핀 CSS는 이 파일 내부 HTML 문자열에서 관리.
-
-### `components/ToiletBottomSheet.tsx`
-
-지도 마커 선택 시 뜨는 바텀시트.
-- 평점 카드
-- 주소
-- 타입/접근 방식 태그
-- 길찾기 버튼 자리
-- 상세보기 버튼
-
-### `app/ToiletDetailScreen.tsx`
-
-상세 화면.
-- 기본 정보
-- 평점/리뷰 요약
-- 리뷰 작성 화면으로 이동
-
-### `app/ReviewWriteScreen.tsx`
-
-리뷰 작성 화면 UI.
-- 아직 Supabase insert 미연결
-- 제출 시 임시 Alert 후 뒤로 이동
-
-### `app/(tabs)/gold.tsx`
-
-황금칸 탭.
-- 현재는 `DEMO_TOILETS`를 평점순으로 정렬해서 표시
-- 카드 선택 시 상세 화면 이동
-
-### `constants/theme.ts`
-
-시안 기반 공통 색상과 radius 상수.
-
-### `lib/demoToilets.ts`
-
-개발용 데모 fallback 진입점.
-- 현재는 `lib/cityhallDemoToilets.ts`의 1000개 데이터를 우선 사용
-- 기존 3개 seed 데이터는 fallback의 fallback으로 남아 있음
-
-### `lib/cityhallDemoToilets.ts`
-
-시청역 근처 로컬 데모 화장실 1000개.
-- `tmp/cityhall-demo-preview.json`에서 생성됨
-- Supabase SQL 실행 전에도 앱에서 1000개 마커를 확인하기 위한 임시 데이터
-- 나중에 실제 공공데이터/DB 데이터가 들어오면 제거 가능
-
-### `lib/toiletService.ts`
-
-Supabase 조회 로직.
-- 실제 DB 데이터가 없으면 dev 환경에서 `DEMO_TOILETS` 반환
-- 상세도 로컬 데모 id면 Supabase 조회 전에 fallback 반환
-- 목록 조회 limit은 1000개로 설정되어 있음
-
-### `scripts/importPublicToilets.mjs`
-
-공공데이터포털 `전국공중화장실표준데이터`를 가져와 Supabase insert용 SQL을 생성하거나 service role key로 직접 upsert.
-
-기본 실행은 SQL 생성:
-
-```bash
-npm run import:toilets -- --region=서울특별시 --limit=500
-```
-
-필요 환경 변수:
-
-```bash
-DATA_GO_KR_API_KEY=공공데이터포털_서비스키
-```
-
-생성 파일:
-- `tmp/public-toilets-preview.json`
-- `tmp/public-toilets-import.sql`
-
-service role key가 있으면 직접 import 가능:
-
-```bash
-SUPABASE_SERVICE_ROLE_KEY=... npm run import:toilets -- --mode=supabase --region=서울특별시 --limit=500
-```
-
-자동 동기화:
-
-```bash
-npm run public-toilets:sync:mcp
-```
-
-- 현재 로컬 Mac에는 `launchd`로 매일 03:00 자동 실행 등록 완료
-- LaunchAgent: `/Users/hyunsookim/Library/LaunchAgents/com.hwachelin.public-toilets-sync.plist`
-- 실행 로그: `/tmp/hwachelin-public-toilets-sync.log`
-- 오류 로그: `/tmp/hwachelin-public-toilets-sync.err.log`
-- 이 로컬 자동화는 Claude Desktop의 Supabase MCP 설정을 읽어서 SQL을 실행함
-
-GitHub Actions 운영 자동화:
-- `.github/workflows/sync-public-toilets.yml`
-- 매일 03:00 KST 실행
-- GitHub repository secrets 필요:
-  - `DATA_GO_KR_API_KEY`
-  - `EXPO_PUBLIC_SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
-- GitHub repository secrets 3개 등록 완료
-- 수동 실행 검증 완료
-  - Run: `https://github.com/khs983770-star/hwachelin/actions/runs/25145083255`
-  - 결과: `Supabase import 완료: places 276개, toilets 276개, stale public toilets 정리 완료`
-
-### `scripts/generateCityHallDemoToilets.mjs`
-
-공공데이터 키 승인 대기 중 지도/성능 검증용으로 시청역 근처 임시 데이터 생성.
-
-```bash
-npm run demo:cityhall -- --count=1000
-```
-
-생성 파일:
-- `tmp/cityhall-demo-import.sql`: Supabase SQL Editor에서 실행하면 `places` 1000개, `toilets` 1000개, 데모 리뷰 약 3000개 생성
-- `tmp/cityhall-demo-cleanup.sql`: 나중에 데모 데이터를 삭제할 때 실행
-
-데모 데이터는 `places.kakao_place_id like 'demo_cityhall:%'`로 식별 가능.
-
----
-
-## 8. Supabase 현재 전제
-
-테이블:
+### places
 
 ```sql
-users
-places
-toilets
-reviews
+id              UUID  PK
+name            TEXT
+address         TEXT
+lat             FLOAT
+lng             FLOAT
+location        GEOMETRY(Point, 4326)  -- PostGIS (lat/lng 트리거로 자동 동기화)
+source          TEXT  'public' | 'user'
+kakao_place_id  TEXT  UNIQUE
+created_at      TIMESTAMP
 ```
 
-현재 앱이 기대하는 주요 컬럼:
-- `places`: `id`, `name`, `address`, `lat`, `lng`, `source`, `kakao_place_id`
-- `toilets`: `id`, `place_id`, `type`, `access_type`, `floor`, `gender_type`, `registered_by`
-- `reviews`: `id`, `toilet_id`, `user_id`, `rating`, `cleanliness`, `paper`, `soap`, `security`, `comment`, `is_verified`
+### toilets
 
-주의:
-- RLS가 켜져 있어 anon insert는 막혀 있음
-- 읽기는 가능해야 함
-- 실제 데이터 import 전까지는 개발용 데모 마커만 보임
+```sql
+id                    UUID  PK
+place_id              UUID  FK → places
+type                  TEXT  '공공' | '매장'
+access_type           TEXT  '누구나' | '손님만' | '비밀번호'
+floor                 INT
+gender_type           TEXT  '남녀분리' | '공용' | '남자' | '여자'
+is_24hours            BOOL  DEFAULT false
+has_diaper_table      BOOL  DEFAULT false
+disabled_available    BOOL  DEFAULT false  -- 장애인 화장실 여부
+emergency_bell        BOOL  DEFAULT false  -- 비상벨 설치 여부
+operating_hours       TEXT  (예: "09:00~22:00")
+avg_rating            FLOAT DEFAULT 0     -- 트리거로 자동 업데이트
+review_count          INT   DEFAULT 0     -- 트리거로 자동 업데이트
+bidet_count           INT   DEFAULT 0     -- 트리거로 자동 업데이트
+male_stalls           INT   NULL
+male_urinals          INT   NULL
+female_stalls         INT   NULL
+disabled_male_stalls  INT   NULL
+disabled_male_urinals INT   NULL
+disabled_female_stalls INT  NULL
+registered_by         UUID  FK → auth.users (nullable)
+created_at            TIMESTAMP
+```
+
+### reviews
+
+```sql
+id                UUID  PK
+toilet_id         UUID  FK → toilets
+user_id           UUID  FK → auth.users
+rating            FLOAT
+cleanliness_level TEXT  'clean' | 'normal' | 'dirty' | NULL  -- 청결 수준 enum
+cleanliness       BOOL  -- cleanliness_level === 'clean' 파생 (하위호환)
+paper             BOOL
+soap              BOOL
+hand_dryer        BOOL  NULL
+hand_tissue       BOOL  NULL
+has_password      BOOL  NULL  -- 비밀번호 화장실 여부 (텍스트 노출 금지)
+bidet             BOOL  DEFAULT false
+security          BOOL  NULL  (비상벨/안전 — UI에서 현재 미사용)
+comment           TEXT
+image_urls        TEXT[]
+is_verified       BOOL  (GPS 50m 이내)
+created_at        TIMESTAMP
+```
+
+### reports
+
+```sql
+id              UUID  PK
+user_id         UUID  FK → auth.users
+toilet_id       UUID  FK → toilets (수정 제보 시)
+report_type     TEXT  'new_toilet' | 'correction'
+place_name      TEXT
+address         TEXT
+lat, lng        FLOAT
+access_type     TEXT
+floor           TEXT
+gender_type     TEXT
+has_password    BOOL
+operating_hours TEXT
+comment         TEXT
+status          TEXT  'pending' | 'reviewing' | 'approved' | 'rejected'
+rejection_reason TEXT
+created_at      TIMESTAMP
+```
+
+### users
+
+```sql
+id          UUID  PK (= auth.users.id)
+nickname    TEXT
+is_admin    BOOL  DEFAULT false
+created_at  TIMESTAMP
+```
+
+### bookmarks
+
+```sql
+id          UUID  PK
+user_id     UUID  FK → auth.users
+toilet_id   UUID  FK → toilets
+created_at  TIMESTAMP
+UNIQUE(user_id, toilet_id)
+```
 
 ---
 
-## 9. 알려진 이슈 / 주의사항
+## 7. RPC / DB 함수
+
+### `toilets_near(lat, lng, radius_m, limit_n)`
+
+PostGIS 기반 반경 조회. `getToiletsInRegion()`에서 우선 호출하고 실패 시 bounding box fallback.
+
+```sql
+SELECT t.*, p.name, p.address, p.lat, p.lng
+FROM toilets t JOIN places p ON t.place_id = p.id
+WHERE ST_DWithin(p.location::geography, ST_MakePoint(lng, lat)::geography, radius_m)
+ORDER BY p.location <-> ST_MakePoint(lng, lat)::geography
+LIMIT limit_n;
+```
+
+### `update_toilet_review_stats()` 트리거
+
+`reviews` INSERT/UPDATE/DELETE 시 `toilets.avg_rating`, `review_count`, `bidet_count` 자동 업데이트.
+
+---
+
+## 8. Edge Functions
+
+### `delete-account` (verify_jwt: true)
+
+회원 탈퇴. 서비스 롤로 아래 순서로 삭제:
+1. `bookmarks` → 2. `reviews` (Storage 파일 포함) → 3. `reports` → 4. `users` → 5. `auth.users`
+
+호출: `POST {SUPABASE_URL}/functions/v1/delete-account`  
+Authorization: `Bearer {access_token}`
+
+### `sync-public-toilets` (verify_jwt: false)
+
+data.go.kr 공공화장실 데이터 Supabase 동기화.
+- API 키는 body `{ "region": "서울특별시", "apiKey": "..." }` 또는 환경변수로 전달
+- API 실패 시 CSV 자동 fallback (EUC-KR 디코딩)
+- pg_cron 스케줄: 매주 일요일 18:00 UTC (월요일 03:00 KST)
+
+수동 트리거:
+```bash
+curl -X POST https://jdcymglzmcnewgsimatc.supabase.co/functions/v1/sync-public-toilets \
+  -H "Content-Type: application/json" \
+  -d '{"region":"서울특별시"}'
+```
+
+---
+
+## 9. RLS 정책 요약
+
+| 테이블 | 정책 | 조건 |
+|--------|------|------|
+| reviews | select | 공개 |
+| reviews | insert | `auth.uid() = user_id` |
+| reviews | update/delete | `auth.uid() = user_id` |
+| reports | select | `auth.uid() = user_id` |
+| reports | insert | `auth.uid() = user_id` |
+| reports | update (admin) | `users.is_admin = true` |
+| places | insert (admin) | `users.is_admin = true` |
+| toilets | insert (admin) | `users.is_admin = true` |
+| bookmarks | all | `auth.uid() = user_id` |
+| users | select/insert/update | `auth.uid() = id` |
+
+---
+
+## 10. GitHub Pages (정책 문서)
+
+URL: https://khs983770-star.github.io/hwachelin/
+
+- `/` — 서비스 홈
+- `/privacy-policy/` — 개인정보처리방침
+- `/terms-of-service/` — 이용약관
+
+시행일: 2026년 5월 1일  
+앱 내 Policy 화면(`PolicyScreen.tsx`)이 해당 URL을 WebView로 표시.
+
+---
+
+## 11. 앱 네비게이션 구조
+
+```
+Stack.Navigator (initialRouteName: AsyncStorage ONBOARDING_DONE_KEY 확인 후 결정)
+├── Onboarding          ← 최초 실행 시에만 (ONBOARDING_DONE_KEY 없을 때)
+├── MainTabs (Bottom Tabs)
+│   ├── 지도 (index)
+│   ├── 황금칸 (gold)
+│   └── 마이페이지 (mypage)
+├── ToiletDetail
+├── ReviewWrite
+├── Report
+├── MyReviews
+├── MyBookmarks
+├── MyReports           ← 내 제보 내역 (마이페이지에서 진입)
+├── Admin               ← is_admin 유저만 접근
+└── Policy              ← { type: 'privacy' | 'terms' }
+```
+
+---
+
+## 12. 현재 구현 상태
+
+### ✅ 완료
+
+| 기능 | 비고 |
+|------|------|
+| 카카오맵 + 클러스터링 | 줌별 클러스터, 커스텀 화장실 핀, 평점 배지, 클러스터 탭 목록 바텀시트 |
+| 지도 재탐색 UX | 지도 이동마다 API 호출하지 않고, 400m 이상 이동 시 `이 지역에서 재탐색` 버튼 표시 |
+| 화면 범위 기반 조회/카운트 | KakaoMap bounds/radius를 RN으로 전달해 현재 화면 안의 화장실만 마커/카운트/황금칸 컨텍스트에 반영 |
+| 화장실 조회 | PostGIS `ST_DWithin` RPC, viewport 기반 동적 반경, 실패 시 bounding box fallback |
+| 데모 데이터 제어 | `EXPO_PUBLIC_ENABLE_DEMO_TOILETS=true`일 때만 데모 화장실 노출, 기본은 숨김 |
+| 검색 + 필터 | Kakao Local API + 로컬 DB 병합 자동완성, 최근 검색 10개 저장/개별 삭제/전체 삭제, 인기 검색 mock frequency, 자동완성 랭킹 |
+| 황금칸 탭 | 현재 지도/검색/필터 bounds 컨텍스트 기반 베이즈 가중 점수 랭킹 |
+| 화장실 상세 | avg_rating 캐시, 리뷰 목록, operating_hours, 영업 상태 |
+| 리뷰 작성/수정/삭제 | GPS 인증, 비밀번호 필터 |
+| 카카오 로그인 | PKCE, expo-web-browser |
+| 마이페이지 | 리뷰/제보/북마크 통계, 서비스 정보 |
+| 내 리뷰/북마크 전체 목록 | MyReviewsScreen, MyBookmarksScreen |
+| 화장실 제보 | pending→reviewing→approved/rejected |
+| 제보 승인 어드민 | AdminScreen (is_admin 유저 전용) |
+| 북마크 | bookmarks 테이블, 상세 화면 토글 |
+| 회원 탈퇴 | Edge Function + 마이페이지 UI |
+| 온보딩 화면 | 4슬라이드, 현재는 앱 진입 때마다 표시 |
+| 공공화장실 데이터 | 서울 276개 + 자동 싱크 (주 1회) |
+| PostGIS 최적화 | `toilets_near()` RPC + GIST 인덱스 |
+| avg_rating 캐시 | 트리거 자동 업데이트 |
+| EAS 빌드 설정 | production 프로파일, autoIncrement |
+| iOS Privacy Manifest | UserDefaults/FileTimestamp/SystemBootTime |
+| 개인정보처리방침/이용약관 | GitHub Pages 호스팅 |
+| 앱 내 Policy 화면 | PolicyScreen WebView |
+| 영업중/마감 배지 | `operating_hours` 파싱, 지도 마커/바텀시트/상세/황금칸 표시 |
+| 길찾기 연동 | 카카오맵 앱 딥링크, iOS/Android 지도 fallback, 카카오맵 웹 fallback |
+| 사진 풀스크린 뷰어 | 리뷰 사진 탭 시 전체화면 모달 표시 |
+| 장소 검색 흐름 | SearchBar/useSearch/searchService 분리, 지역/건물/가게 검색 결과 선택 → 지도 이동 → 주변 화장실 조회/리뷰 확인/신규 제보 |
+| 검색 랭킹 | 화장실 데이터 보유 > 높은 평점 > 리뷰 수 > 가까운 거리 순으로 자동완성 정렬 |
+| 검색 인텐트 감지 | `isAreaSearch(categoryGroupCode)` — 빈 코드(지역명·행정구역) 또는 SW8(지하철역)이면 지도만 이동, 그 외 가게/건물은 바텀시트 표시 |
+| NoToiletSheet | 특정 장소 검색 후 DB에 화장실 없을 때 "근처 화장실 보기 / 화장실 등록하기" CTA 바텀시트 표시 |
+| ToiletIcon 컴포넌트 | View 기반 변기 모양 아이콘 — 마커 핀, 클러스터 바텀시트, 단일 바텀시트 전체 통일 |
+| 리뷰 카드 체크리스트 칩 | 상세 화면 리뷰 카드에 청결도/휴지/비누/비데/안전 체크 항목을 칩으로 표시 |
+| ScreenHeader 안전 영역 대응 | `useSafeAreaInsets`로 paddingTop 분리 + row minHeight 독립 설정, 실기기 짜부 현상 수정 |
+| 온보딩 첫 실행 시에만 표시 | `ONBOARDING_DONE_KEY` AsyncStorage 플래그 — App.tsx 초기화 시 확인, OnboardingScreen 마지막 슬라이드에서 저장 |
+| 앱 아이콘 / 스플래시 교체 | 브랜드 이미지 적용 완료 (assets/icon.png, splash-icon.png, adaptive-icon.png, map-tab-icon.png) |
+| isAreaSearch AD5 코드 추가 | `AREA_SEARCH_CODES: readonly string[]` 상수 export, AD5(행정구역) + SW8(지하철) 포함 |
+| NoToiletSheet 반경 동적 조정 | 대형 시설(백화점/쇼핑/공항/대학/대형마트) 150m, 일반 50m |
+| 황금칸 최신성 휴리스틱 보너스 | avgRating≥4.5 & count≥3 → +0.2 / avgRating≥4.0 & count≥10 → +0.1 (cap 5.0) |
+| 카카오맵 마커 전환 | CustomOverlay → `kakao.maps.Marker` + `kakao.maps.MarkerImage` (RGBA PNG 변기마커핀.png) |
+| 비활성 마커 이미지 분기 | `MARKER_IMAGE_SRC_INACTIVE` 그레이스케일 이미지 사용 (opacity 제거) |
+| 재탐색 트리거 기준 전환 | 거리 기반(400m) → vp bounds 이탈 기준 (`lastFetchedBoundsRef`) |
+| MyReportsScreen | 내 제보 내역 목록 — 상태(pending/reviewing/approved/rejected) 표시, 마이페이지 통계 카드 연결 |
+| HwachelinStars 컴포넌트 | 꽃(✿) 마크 평점 — 부분 채움(clip) 지원, size/color/gap 파라미터화 |
+| MarkerPinIcon 컴포넌트 | 지도 마커핀과 동일한 View 형태 — 온보딩/UI 설명용 |
+| goldContext.ts | 황금칸 탭↔지도 탭 간 bounds/toilets/filter 공유 snapshot (이벤트 리스너 패턴) |
+| reviews 체크리스트 필드 확장 | `cleanliness_level` TEXT enum + `hand_dryer`, `hand_tissue`, `has_password` 추가 |
+
+### 지도 조회 / 마커 UX 상세 (2026-05-02 기준)
+
+- `KakaoMapView.tsx`가 Kakao Maps WebView의 `idle` 이벤트마다 `center`, `radiusKm`, `bounds`를 React Native로 전달한다.
+- `app/(tabs)/index.tsx`는 전달받은 viewport 반경에 15% 여유를 더해 조회 반경을 계산한다.
+- viewport 계산 로직은 `lib/mapViewport.ts`, 필터/운영 상태 로직은 `lib/mapToiletFilters.ts`로 분리해 지도 화면 수정 시 읽어야 하는 코드량을 줄였다.
+- 실기기 최초 진입 시 위치 조회가 끝나기 전 시청역 기본 좌표로 KakaoMap WebView가 먼저 초기화되지 않도록, 초기 위치 또는 fallback 위치가 확정된 뒤 지도를 렌더링한다.
+- 위치 조회는 최근 위치를 먼저 사용하고, 현재 위치 조회가 8초 이상 걸리면 시청역 fallback으로 전환한다. fallback 조회 반경은 3km로 넉넉하게 잡는다.
+- 고정 3km 자동 조회를 제거하고, 지도 이동 후 400m 이상 차이가 날 때만 `이 지역에서 재탐색` 버튼을 표시한다.
+- 기존 결과는 새 조회가 완료될 때까지 유지해 지도 이동 중 빈 화면이 나오지 않게 했다.
+- `visibleBounds` 밖의 화장실은 `mapToilets`, 카운트 배지, `goldContext`에서 제외한다.
+- 클러스터 마커를 누르면 즉시 줌인만 하지 않고 `ClusterBottomSheet`로 해당 클러스터 안의 화장실 목록을 보여준다.
+- 마커는 빨간 pin + 흰색 화장실 아이콘 + 평점 pill 배지를 사용한다. 리뷰/평점이 없거나 마감 상태인 경우 회색 inactive 스타일을 사용한다.
+- Apple Maps fallback에서는 `Region`의 `latitudeDelta/longitudeDelta`로 bounds와 radius를 계산한다.
+
+### 검색 기능 상세 (2026-05-02 기준)
+
+- 입력마다 300ms debounce 후 Kakao Local keyword API 호출.
+- 이전 요청은 `AbortController`로 취소해 뒤늦은 응답이 UI를 덮어쓰지 않게 처리.
+- 검색 대상은 장소명/키워드/카테고리를 우선하고 주소는 보조 정보로 노출.
+- 지도에 로드된 Supabase 화장실 데이터와 Kakao 결과를 병합해서 노출.
+- 자동완성 드롭다운은 검색창 아래 absolute overlay로 표시되어 상단 필터 칩 위치를 밀지 않음.
+- 자동완성 목록은 스크롤 가능하고, 스크롤 시 키보드를 닫는다.
+- 빈 입력 상태에서는 최근 검색어와 인기 검색어를 표시.
+- 검색 입력 중에는 지도 필터 칩을 자동완성 결과에 적용하지 않는다. 필터는 지도 결과에만 적용해 자동완성이 비는 문제를 방지한다.
+- 로컬 DB 결과는 상세보기로 연결하고, Kakao 일반 장소는 화장실 제보 화면으로 연결.
+- 검색 인텐트 자동 감지: Kakao `category_group_code`가 빈 문자열(지역명·행정구역)이거나 `SW8`(지하철역)이면 지도 중심만 이동하고 바텀시트를 열지 않는다. 그 외(카페, 음식점, 편의점 등)는 가게 단위 검색으로 판단해 바텀시트를 표시하거나 NoToiletSheet를 보여준다.
+- 장소 선택 시 DB에서 50m 반경 이내 화장실을 찾아보고 없으면 `NoToiletSheet`로 "화장실 등록하기" CTA 제공.
+
+### ❌ 미구현 (우선순위 순)
+
+| 기능 | 비고 |
+|------|------|
+| App Store Connect 앱 등록 + 스크린샷 | 6.7인치/6.5인치 iOS, Android |
+| EAS 프로덕션 빌드 + TestFlight 배포 | eas build --platform ios --profile production |
+| App Store 심사 제출 | 외부 작업 |
+| 검색 후 재탐색 버튼 자동 숨김 | selectPlaceResult() 후 setLastFetchedCenter 업데이트 필요 |
+| GPS 인증 실패 안내 토스트 | "비인증 리뷰로 저장됩니다" 메시지 명확화 |
+| 황금칸 알림 | Expo Push Notifications |
+| 인기 검색어 서버 기반 집계 | 현재 mock frequency |
+| 운영시간 파서 고도화 | 요일별/점심시간/공휴일 패턴 확장 |
+| 비밀번호 리뷰 필터 강화 | AI 텍스트 검증 또는 정규식 고도화 |
+
+---
+
+## 13. 알려진 이슈 / 주의사항
 
 ### 카카오맵 WebView
 
-카카오맵이 안 뜨면 먼저 확인:
-1. Kakao Developers Web 플랫폼 도메인
+카카오맵이 안 뜨면 확인:
+1. Kakao Developers Web 플랫폼 도메인 등록 여부
 2. 카카오맵 API 사용 설정 ON
-3. 앱 키가 JavaScript 키인지
+3. 앱 키가 JavaScript 키인지 확인
 
-현재는 설정 완료되어 시뮬레이터에서 카카오맵 렌더링 확인됨.
+지도 조회 관련 주의:
+- 카운트 배지는 `visibleBounds` 기준이라 클러스터 안의 항목까지 포함한다. 보이는 핀 수보다 카운트가 큰 것은 정상이다.
+- `GoldScreen`을 지도 탭 방문 전 바로 열면 fallback으로 현재 중심 기준 조회를 수행한다. 지도 탭을 거친 뒤에는 지도 bounds 컨텍스트가 우선이다.
+- `getToiletsInRegion()` 기본값은 호환성 때문에 3km로 남아 있지만, 지도 탭에서는 viewport 기반 동적 반경을 명시해서 호출한다.
 
-### 지도 오버레이 순서
+### EAS 빌드
 
-WebView는 네이티브 레이어처럼 동작해서 JSX 순서에 따라 오버레이가 가려질 수 있음. 지도 위에 떠야 하는 UI는 `KakaoMapView` 뒤쪽 JSX에 배치해야 함.
+- `eas.json`의 `submit.production.ios` 블록은 `ascAppId`/`appleTeamId` 없으면 검증 오류 → 현재 iOS submit 설정 제거됨 (Android만 있음)
+- 프로덕션 빌드 전 `autoIncrement: true` 설정으로 buildNumber/versionCode 자동 증가
 
-### UI 기준
+### 공공데이터 API 키
 
-참고 시안의 방향:
-- 오프화이트 배경
-- 오렌지 포인트
-- 얇은 테두리
-- 검색/필터 상단바
-- 평점형 지도 핀
-- 카드보다는 가볍고 조밀한 정보 구조
+- `DATA_GO_KR_API_KEY`는 Edge Function secrets에 미등록 (PAT 필요)
+- 현재 pg_cron은 body 없이 호출 → CSV fallback으로 자동 작동 (서울 데이터 약 276개, 원천/중복 제거에 따라 변동 가능)
+- API 키 등록하려면: Supabase Dashboard → Edge Functions → Secrets
 
-### 시청역 로컬 데모 1000개
+### 데모 화장실 데이터
 
-- 앱 fallback에 반영 완료
-- 시뮬레이터에서 `화장실 1000개` 표시 확인 완료
-- 카카오맵 WebView 내부 클러스터링 반영 완료
-- 클러스터는 원형 숫자 배지로 표시됨
-- 오른쪽 하단에 지도 줌 `+ / -` 버튼 추가 완료
-- 클러스터를 탭하면 해당 위치 기준으로 한 단계 확대됨
-- 검색/필터 결과에 맞춰 지도 마커와 카운트 배지가 즉시 동기화되도록 연결 완료
-- `24시간`, `비데`, `기저귀` 필터는 현재 DB 컬럼이 없어 비활성 처리
+- 기본값은 숨김이다.
+- 필요할 때만 `.env.local`에 `EXPO_PUBLIC_ENABLE_DEMO_TOILETS=true`를 넣고 앱을 재시작한다.
+- `demo-`, `demo_`, `시청역 데모`, `데모로` 패턴은 `lib/toiletService.ts`에서 필터링한다.
+
+### 어드민 계정
+
+- `users.is_admin = true` 인 유저만 AdminScreen 접근 가능
+- Supabase Dashboard에서 직접 `UPDATE users SET is_admin = true WHERE id = '...'`로 설정
 
 ---
 
-## 10. 지금부터 해야 할 일
+## 14. 다음 작업 추천
 
-### 1순위: 검색/필터 실제 동작 연결 - 완료
+### 1순위: App Store 제출
 
-시청역 로컬 데모 1000개 기준으로 탐색 UX 검증이 가능하도록 지도 화면에 실제 검색/필터를 연결했다.
+1. App Store Connect 앱 등록 (번들 ID: `com.hwachelin.app`)
+2. EAS 프로덕션 빌드 (`eas build --platform ios --profile production`)
+3. 6.7인치/6.5인치 스크린샷 (TestFlight 설치 후 시뮬레이터에서 캡처)
+4. 심사 제출
 
-완료 내용:
-1. 검색창 실제 연결
-   - 이름, 주소, 화장실 유형, 접근 유형, 층, 남녀구분을 대상으로 현재 목록을 필터링
-   - 검색어 입력 시 카카오맵 마커 배열과 카운트 배지가 함께 갱신됨
-2. 필터 칩 실제 연결
-   - `전체`: 모든 결과
-   - `개방형`: `access_type === '누구나'`
-   - `남녀분리`: `gender_type === '남녀분리'`
-   - `별점`: `avg_rating >= 4.3`
-   - `24시간`, `비데`, `기저귀`: 현재 DB 컬럼 부족으로 비활성 처리
-3. 카운트 배지 개선
-   - 전체 상태: `데모 화장실 1000개`
-   - 검색/필터 상태: `검색 결과 N개`
-   - 결과 없음: `조건에 맞는 화장실 없음`
-4. 클러스터링 밀도 미세조정
-   - 검색/필터 후 마커 수가 줄었을 때 가까운 줌에서 너무 빨리 뭉치지 않도록 줌 레벨별 그리드 간격을 소폭 축소
+### 2순위: 검색 후 재탐색 버튼 자동 숨김
 
-검증:
-- `npx tsc --noEmit` 통과
-- iOS 시뮬레이터에서 기본 지도, 카운트 배지, 필터 칩 비활성 상태 표시 확인
-- 스크린샷: `/tmp/hwachelin-search-filter-base.png`
+`app/(tabs)/index.tsx` `selectPlaceResult()` 내부, `fetchToilets()` 호출 직후에 아래를 추가:
 
-### 2순위: 리뷰 저장 연결 - 구현 완료, 실제 저장은 로그인 필요
-
-`ReviewWriteScreen.tsx`의 제출을 Supabase `reviews` insert로 연결했다.
-
-완료 내용:
-1. 리뷰 저장 서비스 추가
-   - `lib/reviewService.ts`
-   - Supabase Auth 사용자 확인 후 `reviews` insert
-   - 로그인하지 않은 상태는 `NOT_LOGGED_IN`으로 처리
-2. 별점/체크리스트/메모를 `reviews` 컬럼에 매핑
-   - `rating`
-   - `cleanliness`
-   - `paper`
-   - `soap`
-   - `security`
-   - `comment`
-3. GPS 50m 이내면 `is_verified=true`
-   - 리뷰 작성 화면 진입 시 상세 화면에서 `toiletLat`, `toiletLng` 전달
-   - 현재 위치와 화장실 좌표를 Haversine 거리로 비교
-4. 비밀번호/민감정보 텍스트 필터링
-   - 숫자 4자리 이상 차단
-   - `비번`, `비밀번호`, `번호는` 등 표현 감지
-5. 저장 성공 후 상세 화면으로 복귀
-
-검증:
-- `npx tsc --noEmit` 통과
-- 현재는 Kakao/Supabase 로그인 미구현 상태라 실제 `reviews` row 생성은 로그인 구현 후 최종 검증 필요
-- 비밀번호 의심 텍스트 차단 로직은 코드 연결 완료
-
-### 3순위: 시청역 데모 1000개를 Supabase에 넣고 지도 검증 - 완료
-
-공공데이터포털 요청은 접수 대기 중. 로컬 fallback이 아닌 DB 기반 조회도 확인하려면 시청역 근처 임시 데모 데이터 1000개를 Supabase에 넣어 검증한다.
-
-사용한 파일:
-- `tmp/cityhall-demo-import.sql`
-- `tmp/cityhall-demo-cleanup.sql`
-- `tmp/cityhall-demo-preview.json`
-- `/tmp/places-batch-1.sql` ~ `/tmp/places-batch-10.sql`
-- `/tmp/toilets-batch-1.sql` ~ `/tmp/toilets-batch-10.sql`
-
-완료 내용:
-1. Supabase MCP를 통해 데모 `places` 1000개 insert/upsert 확인
-2. Supabase MCP를 통해 데모 `toilets` 1000개 insert/upsert 확인
-3. DB 검증 쿼리 결과
-   - `places where kakao_place_id like 'demo_cityhall:%'` = 1000
-   - `toilets join places where kakao_place_id like 'demo_cityhall:%'` = 1000
-4. 앱 재실행 후 시뮬레이터 위치를 시청역 근처로 설정
-   ```bash
-   xcrun simctl location booted set 37.5657,126.9770
-   ```
-5. 지도에서 `데모 화장실 1000개` 표시 확인
-   - 스크린샷: `/tmp/hwachelin-db-demo-1000.png`
-
-실제 공공데이터 import 후 정리:
-- `tmp/cityhall-demo-cleanup.sql` 실행 완료
-- `places.kakao_place_id like 'demo_cityhall:%'` = 0
-- 데모 데이터는 현재 Supabase에서 삭제된 상태
-
-데모 데이터를 다시 생성하려면:
-
-```bash
-npm run demo:cityhall -- --count=1000
+```tsx
+setLastFetchedCenter({ lat: place.lat, lng: place.lng });
+setShowRefetchButton(false);
 ```
 
-### 4순위: 실제 공공데이터 import - 완료
+### 3순위: GPS 인증 실패 안내 토스트 명확화
 
-사용한 흐름:
-1. data.go.kr 공공데이터 활용 권한 승인
-2. `.env.local`에 서버 전용 키 추가
-   ```bash
-   DATA_GO_KR_API_KEY=...
-   ```
-3. SQL 생성
-   ```bash
-   npm run import:toilets -- --region=서울특별시 --limit=500
-   ```
-4. OpenAPI 엔드포인트가 `HTTP 500 Unexpected errors`를 반환해 CSV 다운로드 방식으로 자동 전환
-   - CSV URL: `https://file.localdata.go.kr/file/download/public_restroom_info/info`
-   - 인코딩: `euc-kr`
-5. `tmp/public-toilets-import.sql`을 Supabase MCP로 실행
-6. 앱 재실행 후 지도에서 실제 마커 확인
+`ReviewWriteScreen.tsx`에서 GPS 50m 초과 시 "이 리뷰는 비인증 리뷰로 저장됩니다" 토스트 추가.
 
-완료 내용:
-- 서울특별시 실제 공공화장실 `places` 276개 import
-- 서울특별시 실제 공공화장실 `toilets` 276개 import
-- 시청역 3km 기준 앱 지도에서 `화장실 219개` 표시 확인
-- 스크린샷: `/tmp/hwachelin-public-toilets.png`
-- `scripts/importPublicToilets.mjs`는 공공데이터의 문자열 층 정보가 DB integer 컬럼에 그대로 들어가지 않도록 `inferFloor()`로 숫자/NULL 변환 처리 완료
-- `scripts/importPublicToilets.mjs`는 OpenAPI 실패 시 생활편의정보 CSV 다운로드 방식으로 fallback
-- `scripts/syncPublicToiletsViaMcp.mjs` 추가
-  - 공공데이터 수집
-  - `tmp/public-toilets-import.sql` 생성
-  - Supabase MCP `execute_sql`로 자동 반영
-  - 반영 후 count 확인
-- 로컬 Mac `launchd` 매일 03:00 자동 동기화 등록 완료
-- GitHub Actions 매일 03:00 KST 자동 동기화 workflow 추가
+### 4순위: 운영시간 파서 고도화
 
-검증:
-- Supabase count
-  - `places where kakao_place_id like 'public_toilet:%'` = 276
-  - `toilets join places where kakao_place_id like 'public_toilet:%'` = 276
-- `npm run public-toilets:sync:mcp` 수동 1회 실행 성공
-- `npx tsc --noEmit` 통과
+현재 `09:00~22:00`, `24시간`, `주말 휴무` 수준을 처리함. 공공데이터 원문 패턴이 쌓이면 요일별/점심시간/공휴일 문구까지 확장.
 
-### 5순위: 카카오 로그인 - 실제 로그인 및 리뷰 저장 연결 검증 완료
+### 5순위: 지도 UX / 성능 고도화
 
-리뷰 저장과 제보 기능을 제대로 하려면 로그인 필요.
+- `GoldScreen` fallback 조회도 지도 탭과 동일한 viewport 정책으로 통일
+- `idle` 이벤트에 WebView 내부 50~100ms debounce 추가 (연속 postMessage 최적화)
+- 공공화장실 데이터가 많은 지역에서 클러스터 겹침 세부 보정
 
-완료한 앱 작업:
-- `lib/authService.ts` 추가
-  - `supabase.auth.signInWithOAuth({ provider: 'kakao' })`
-  - `expo-web-browser` 기반 OAuth 세션 열기
-  - 앱 딥링크 redirect URL로 돌아온 `code`를 `exchangeCodeForSession()`으로 세션화
-  - 로그인 성공 후 `public.users`에 `{ id, nickname }` insert
-- 마이페이지 로그인 UI 추가
-  - 카카오 로그인 버튼
-  - 로그인 상태 표시
-  - 로그아웃
-  - 내가 작성한 리뷰 수 표시
-- 리뷰 작성 화면에서 비로그인 상태일 때 `로그인하기` 액션 연결
-- 비로그인 상태에서 리뷰 등록 시 로그인 성공 후 같은 리뷰 제출을 자동 재시도
-- 리뷰 저장 후 상세 화면으로 돌아오면 상세 데이터와 리뷰 요약을 자동 갱신
-- RLS 확인 완료
-  - `reviews_insert`: `auth.uid() = user_id`
-  - `users_insert`: `auth.uid() = id`
+### 6순위: 검색 UX 고도화
 
-외부 설정:
-1. Supabase Dashboard → Authentication → Providers → Kakao 활성화 완료
-   - Kakao REST API Key 입력
-   - Kakao Client Secret 입력
-2. Supabase Dashboard → Authentication → URL Configuration
-   - Redirect URL 추가: `hwachelin://auth/callback`
-3. Kakao Developers → 제품 설정 → 카카오 로그인
-   - 카카오 로그인 활성화
-   - Redirect URI 추가: `https://jdcymglzmcnewgsimatc.supabase.co/auth/v1/callback`
-4. Kakao Developers → 동의항목
-   - 닉네임/profile nickname 선택 동의 설정
-   - 프로필 이미지/profile_image 선택 동의 권장
+최근/인기 검색어는 현재 로컬 저장 + mock frequency 기반. 운영 단계에서는 Supabase 집계 테이블 또는 Edge Function으로 인기 검색어를 서버 기준으로 계산.
 
-현재 검증 상태:
-- `npx tsc --noEmit` 통과
-- Supabase authorize endpoint 확인 결과: `302`로 `kauth.kakao.com/oauth/authorize` 리다이렉트 확인
-- 기존 `expo-linking` 사용 시 현재 iOS dev client에 네이티브 모듈이 없어 런타임 오류 발생
-- `expo-linking` 의존성을 제거하고 `hwachelin://auth/callback` 고정 redirect + 표준 `URL` 파싱으로 변경 완료
-- 카카오 비즈앱 미등록 상태에서는 `account_email` 동의항목을 사용할 수 없어 OAuth 요청 scope를 `profile_nickname profile_image`로 제한
-- Supabase Kakao Provider의 `Allow users without an email`은 ON 필요
-- Supabase OAuth callback이 `code` 또는 `access_token` 어느 방식으로 돌아와도 처리하도록 보강
-- `lib/supabase.ts`에 `flowType: 'pkce'` 설정
-- 사용자가 시뮬레이터에서 카카오 계정 실제 로그인 성공 확인
-- 시뮬레이터 앱 재실행 후 런타임 오류 없이 지도 화면 렌더링 확인
-- 로그인된 시뮬레이터 세션으로 Supabase RLS `reviews_insert` 검증 완료
-  - 사용자 세션 기반 `reviews` insert 성공
-  - insert된 row 재조회 성공
-- 리뷰 수정/삭제 정책 추가 완료
-  - `reviews_update`: `auth.uid() = user_id`
-  - `reviews_delete`: `auth.uid() = user_id`
-  - 기존 검증용 `Codex 리뷰 저장 연결 테스트...` row 삭제 완료
-  - 실제 사용자 세션으로 `insert → update → delete` 검증 완료
-- 실제 앱 리뷰 작성 후 확인된 이슈 수정 완료
-  - 마이페이지 탭 재진입 시 세션과 리뷰 카운트를 다시 조회하도록 수정
-  - 지도 탭 재진입 시 현재 지도 중심 기준으로 핀 리뷰 통계를 다시 조회하도록 수정
-  - 선택된 핀도 최신 `avg_rating`, `review_count` 값으로 갱신
-- 상세 화면에서 리뷰 목록 표시
-  - 본인 리뷰에는 `내 리뷰` 표시
-  - 본인 리뷰 수정/삭제 버튼 제공
-  - 수정 화면은 기존 리뷰값을 채운 상태로 진입
+### 7순위: 황금칸 알림
 
-### 6순위: 화장실 제보 화면
-
-MVP 핵심 확장 기능.
-
-완료:
-1. Supabase `reports` 테이블 생성
-   - `report_type`: `new_toilet` 또는 `correction`
-   - `toilet_id`: 기존 화장실 수정 제보일 때 연결
-   - 장소명, 주소, 좌표, 이용 조건, 층수, 성별 구분, 비밀번호 여부, 메모, 상태 저장
-   - 기본 상태는 `pending`
-2. RLS 정책 적용
-   - `reports_insert`: 로그인 사용자가 자기 `user_id`로만 insert
-   - `reports_read_own`: 본인 제보만 select
-3. 앱 제보 화면 추가
-   - 마이페이지 → `화장실 제보하기`
-   - 상세 화면 → `정보 수정 제보`
-   - 비로그인 상태에서는 카카오 로그인 후 제보 제출 재시도
-4. 실제 로그인 사용자 세션으로 `reports` insert/read 검증 완료
-   - 검증용 report row 삭제 정리 완료
-
-남은 개선:
-1. 카카오 Local API 장소 검색으로 신규 제보 위치 자동 입력
-2. 관리자 검수 화면 또는 Supabase 관리 프로세스
-3. 승인된 제보를 `places/toilets`에 반영하는 운영 스크립트
-
-### 7순위: 황금칸 - 현재 지도/검색 맥락 기반 랭킹 연결 완료
-
-사용자 정의:
-- 황금칸은 전체 고정 랭킹이 아니라, 사용자가 지도에서 보고 있거나 검색/필터로 좁힌 지역 안의 상위 랭킹이다.
-- 현재 지도/검색/필터 조건 안에서 사람들이 평점을 높게 준 화장실을 황금칸 탭에 노출한다.
-
-완료:
-1. 지도 탭과 황금칸 탭의 공유 맥락 추가
-   - 현재 지도 중심 좌표
-   - 검색어
-   - 선택 필터
-   - 필터 적용 후 지도에 표시 중인 화장실 목록
-2. `황금칸` 탭은 공유 맥락 안의 후보만 랭킹 표시
-3. 리뷰가 있는 장소만 황금칸 후보로 노출
-4. 가중 점수 적용
-   - 단순 평균 평점이 아니라 `avg_rating`, `review_count`, 기본 prior rating을 섞은 황금점수 사용
-   - 리뷰 1개짜리 5점 장소가 과하게 1등이 되는 문제 완화
-5. 황금칸 카드 선택 시 `ToiletDetail`로 이동
-6. 지도 탭이 아직 데이터를 공유하지 않은 상태에서는 현재 중심 좌표 기준으로 주변 화장실을 fallback 조회
-
-### 8순위: 마이페이지 내 활동 목록 연결 완료
-
-완료:
-1. 마이페이지 통계 실제 데이터화
-   - `작성 리뷰`: `reviews` count
-   - `접수 제보`: `reports` count
-   - 기존 고정값 `저장 장소 3` 제거
-2. 내 리뷰 목록 추가
-   - 최근 5개 리뷰 조회
-   - 화장실명, 별점, 메모/주소, 작성일 표시
-   - 항목 선택 시 `ToiletDetail`로 이동
-3. 내 제보 목록 추가
-   - 최근 5개 제보 조회
-   - 장소명, 신규/수정 제보 구분, 주소, 접수일 표시
-   - 상태 배지: `대기`, `검토중`, `승인`, `반려`
-   - 기존 화장실 수정 제보는 항목 선택 시 상세 화면으로 이동
-4. 실제 로그인 사용자 세션으로 마이페이지 쿼리 검증 완료
-   - 현재 계정 기준 `reviews` 4개 조회 확인
-   - `reports` 0개 조회 확인
-
----
-
-## 11. 다음 작업 추천
-
-바로 이어서 한다면 **제보 운영/승인 흐름** 또는 **카카오 Local API 장소 검색**이 최우선.
-
-이유:
-- 지도, 상세, 리뷰, 제보, 황금칸까지 MVP 핵심 사용자 흐름이 연결됨
-- 마이페이지에서 본인이 남긴 리뷰/제보를 확인하는 흐름도 연결됨
-- 제보는 접수만 되고 있으므로 운영자가 승인해 실제 `places/toilets`에 반영하는 흐름이 필요함
-
-다음 작업 후보:
-1. `reports` 승인 스크립트를 만들어 승인된 제보를 `places/toilets`에 반영
-2. 카카오 Local API 검색으로 신규 제보 장소 자동 입력
-3. 저장 장소/북마크 기능 추가
+Expo Push Notifications 기반으로 관심 지역/현재 지도 조건에서 새 황금칸 후보가 생겼을 때 알림.

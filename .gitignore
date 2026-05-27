@@ -36,6 +36,9 @@ config/
 # local env files
 .env*.local
 
+# Claude Code
+.claude/
+
 # typescript
 *.tsbuildinfo
 

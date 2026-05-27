@@ -15,6 +15,7 @@ import { colors } from '../constants/theme';
 import { deleteReview } from '../lib/reviewService';
 import { supabase } from '../lib/supabase';
 import { RootStackParamList } from '../types/navigation';
+import ScreenHeader from '../components/ScreenHeader';
 
 type SortKey = 'latest' | 'rating_high' | 'rating_low';
 
@@ -133,6 +134,7 @@ export default function MyReviewsScreen() {
 
   return (
     <View style={styles.container}>
+      <ScreenHeader title="내가 평가한 화장실" onBack={() => navigation.goBack()} />
       {/* 정렬 탭 */}
       <View style={styles.sortRow}>
         {SORT_OPTIONS.map((opt) => (

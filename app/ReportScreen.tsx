@@ -15,6 +15,7 @@ import { RootStackParamList } from '../types/navigation';
 import { colors } from '../constants/theme';
 import { submitReport } from '../lib/reportService';
 import { signInWithKakao } from '../lib/authService';
+import ScreenHeader from '../components/ScreenHeader';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Report'>;
 
@@ -49,6 +50,7 @@ export default function ReportScreen({ route, navigation }: Props) {
       address,
       lat: params.lat,
       lng: params.lng,
+      kakaoPlaceId: params.kakaoPlaceId,
       floor,
       accessType,
       genderType,
@@ -78,15 +80,19 @@ export default function ReportScreen({ route, navigation }: Props) {
       return;
     }
 
-    Alert.alert('제보가 접수됐어요', '확인 후 데이터에 반영하겠습니다.', [
+    const successMsg =
+      reportType === 'new_toilet'
+        ? '화장실이 바로 등록됐어요! 지도에서 확인해보세요 🚽'
+        : '화장실 정보가 수정됐어요!';
+    Alert.alert('감사해요', successMsg, [
       { text: '확인', onPress: () => navigation.goBack() },
     ]);
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{title}</Text>
-
+    <View style={styles.container}>
+      <ScreenHeader title={title} onBack={() => navigation.goBack()} />
+      <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.segment}>
         <TouchableOpacity
           style={[styles.segmentButton, reportType === 'new_toilet' && styles.segmentButtonOn]}
@@ -198,7 +204,8 @@ export default function ReportScreen({ route, navigation }: Props) {
           <Text style={styles.submitText}>제보 접수하기</Text>
         )}
       </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -222,7 +229,6 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.backgroundPrimary },
   content: { padding: 16, paddingBottom: 36 },
-  title: { fontSize: 22, fontWeight: '700', color: colors.textPrimary, marginBottom: 14 },
   segment: {
     flexDirection: 'row',
     backgroundColor: colors.backgroundSecondary,

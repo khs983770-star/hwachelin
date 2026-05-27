@@ -12,6 +12,20 @@ export function containsSensitiveText(text: string): boolean {
   return SENSITIVE_PATTERNS.some((re) => re.test(text));
 }
 
+// 입력 중 실시간 차단용 — 사용자가 타이핑하는 동안 차단할 패턴
+// (한마디 입력창에서 onChangeText 시 이전 값으로 롤백)
+const REALTIME_BLOCK_PATTERNS = [
+  /\d{4,}/,
+  /비\s*번/,
+  /비\s*밀\s*번\s*호/,
+  /패\s*스\s*워\s*드/i,
+  /password/i,
+];
+
+export function containsRealtimeBlocked(text: string): boolean {
+  return REALTIME_BLOCK_PATTERNS.some((re) => re.test(text));
+}
+
 // ─── GPS 거리 계산 (Haversine) ────────────────────────────────────────────
 export function getDistanceMeters(
   lat1: number, lng1: number,
@@ -48,9 +62,14 @@ export async function checkIsVerified(
   }
 }
 
-// ─── 리뷰 이미지 업로드 ───────────────────────────────────────────────────
-async function uploadReviewImages(userId: string, uris: string[]): Promise<string[]> {
+// ─── 리뷰 이미지 업로드 (picker quality:0.8 압축 — 리사이즈는 dev client 재빌드 후 expo-image-manipulator로 추가 예정) ─────
+async function uploadReviewImages(
+  userId: string,
+  uris: string[]
+): Promise<{ urls: string[]; failedCount: number; lastError?: string }> {
   const urls: string[] = [];
+  let failedCount = 0;
+  let lastError: string | undefined;
 
   for (const uri of uris) {
     try {
@@ -58,7 +77,6 @@ async function uploadReviewImages(userId: string, uris: string[]): Promise<strin
       const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? ext : 'jpg';
       const filename = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${safeExt}`;
 
-      // base64로 읽어서 ArrayBuffer로 변환
       const base64 = await readAsStringAsync(uri, { encoding: 'base64' });
       const byteCharacters = atob(base64);
       const byteArray = new Uint8Array(byteCharacters.length);
@@ -79,39 +97,51 @@ async function uploadReviewImages(userId: string, uris: string[]): Promise<strin
           .getPublicUrl(data.path);
         urls.push(urlData.publicUrl);
       } else if (error) {
+        failedCount += 1;
+        lastError = error.message;
         console.warn('[reviewService] 이미지 업로드 실패:', error.message);
       }
     } catch (e) {
+      failedCount += 1;
+      lastError = e instanceof Error ? e.message : String(e);
       console.warn('[reviewService] 이미지 처리 오류:', e);
     }
   }
 
-  return urls;
+  return { urls, failedCount, lastError };
 }
 
 // ─── 리뷰 insert ─────────────────────────────────────────────────────────
 export interface ReviewInput {
   toiletId: string;
   rating: number;
-  /** 청결 그룹(바닥·변기·냄새·세면대) 중 하나라도 체크 */
-  cleanliness: boolean;
-  /** 휴지 있음 */
-  paper: boolean;
-  /** 비누 있음 */
-  soap: boolean;
-  /** 비데 작동 여부 */
-  bidet: boolean;
-  /** 시설/보안 그룹(도어락·조명·환기·안심) 중 하나라도 체크 */
-  security: boolean;
+  /** 청결 수준: clean(깨끗해요) | normal(보통이에요) | dirty(지저분해요) */
+  cleanlinessLevel: 'clean' | 'normal' | 'dirty' | null;
+  /** 휴지 유무 */
+  paper: boolean | null;
+  /** 비누(핸드워시) 유무 */
+  soap: boolean | null;
+  /** 핸드드라이어 유무 */
+  handDryer: boolean | null;
+  /** 핸드 티슈 유무 */
+  handTissue: boolean | null;
+  /** 비데 유무 */
+  bidet: boolean | null;
+  /** 비밀번호 유무 */
+  hasPassword: boolean | null;
+  /** 분위기 태그 키 배열 (noSmell, brightLight, goodVentilation, sturdyPartition, crowded, waitingLine) */
+  moodTags?: string[];
   comment?: string;
-  /** 첨부할 이미지 로컬 URI 목록 (최대 3장) */
-  imageUris?: string[];
+  /** 새로 첨부할 사진 로컬 URI 배열 (업로드 후 image_urls에 합쳐짐) */
+  photoUris?: string[];
+  /** 기존 image_urls (수정 시 유지할 사진) */
+  existingImageUrls?: string[];
   toiletLat?: number;
   toiletLng?: number;
 }
 
 export type SubmitResult =
-  | { ok: true; isVerified: boolean }
+  | { ok: true; isVerified: boolean; photoFailedCount?: number }
   | { ok: false; reason: 'NOT_LOGGED_IN' | 'SENSITIVE_TEXT' | 'DB_ERROR'; message: string };
 
 export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
@@ -132,28 +162,35 @@ export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
     };
   }
 
-  // 3. GPS 50m 인증 + 이미지 업로드 병렬 처리
-  const [isVerified, imageUrls] = await Promise.all([
+  // 3. GPS 50m 인증
+  const isVerified =
     input.toiletLat != null && input.toiletLng != null
-      ? checkIsVerified(input.toiletLat, input.toiletLng)
-      : Promise.resolve(false),
-    input.imageUris?.length
-      ? uploadReviewImages(user.id, input.imageUris.slice(0, 3))
-      : Promise.resolve([]),
-  ]);
+      ? await checkIsVerified(input.toiletLat, input.toiletLng)
+      : false;
 
-  // 4. Supabase insert
+  // 4. 사진 업로드 (있을 때만)
+  const uploadResult = input.photoUris?.length
+    ? await uploadReviewImages(user.id, input.photoUris)
+    : { urls: [], failedCount: 0 };
+  const imageUrls = [...(input.existingImageUrls ?? []), ...uploadResult.urls];
+
+  // 5. Supabase insert
   const { error } = await supabase.from('reviews').insert({
     toilet_id: input.toiletId,
     user_id: user.id,
     rating: input.rating,
-    cleanliness: input.cleanliness,
-    paper: input.paper,
-    soap: input.soap,
-    bidet: input.bidet,
-    security: input.security,
-    comment: input.comment?.trim() || null,
+    cleanliness_level: input.cleanlinessLevel ?? null,
+    cleanliness: input.cleanlinessLevel === 'clean',
+    paper: input.paper ?? null,
+    soap: input.soap ?? null,
+    hand_dryer: input.handDryer ?? null,
+    hand_tissue: input.handTissue ?? null,
+    has_password: input.hasPassword ?? null,
+    bidet: input.bidet ?? false,
+    security: null,
+    mood_tags: input.moodTags?.length ? input.moodTags : null,
     image_urls: imageUrls,
+    comment: input.comment?.trim() || null,
     is_verified: isVerified,
   });
 
@@ -161,7 +198,7 @@ export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
     return { ok: false, reason: 'DB_ERROR', message: error.message };
   }
 
-  return { ok: true, isVerified };
+  return { ok: true, isVerified, photoFailedCount: uploadResult.failedCount };
 }
 
 export async function updateReview(
@@ -183,24 +220,27 @@ export async function updateReview(
     };
   }
 
-  // 새로 추가한 이미지 업로드 (로컬 URI만, http로 시작하는 기존 URL은 제외)
-  const newUris = (input.imageUris ?? []).filter((u) => !u.startsWith('http'));
-  const existingUrls = (input.imageUris ?? []).filter((u) => u.startsWith('http'));
-
-  const uploadedUrls = newUris.length ? await uploadReviewImages(user.id, newUris) : [];
-  const finalImageUrls = [...existingUrls, ...uploadedUrls].slice(0, 3);
+  // 새 사진 업로드
+  const uploadResult = input.photoUris?.length
+    ? await uploadReviewImages(user.id, input.photoUris)
+    : { urls: [], failedCount: 0 };
+  const imageUrls = [...(input.existingImageUrls ?? []), ...uploadResult.urls];
 
   const { error } = await supabase
     .from('reviews')
     .update({
       rating: input.rating,
-      cleanliness: input.cleanliness,
-      paper: input.paper,
-      soap: input.soap,
-      bidet: input.bidet,
-      security: input.security,
+      cleanliness_level: input.cleanlinessLevel ?? null,
+      cleanliness: input.cleanlinessLevel === 'clean',
+      paper: input.paper ?? null,
+      soap: input.soap ?? null,
+      hand_dryer: input.handDryer ?? null,
+      hand_tissue: input.handTissue ?? null,
+      has_password: input.hasPassword ?? null,
+      bidet: input.bidet ?? false,
+      mood_tags: input.moodTags?.length ? input.moodTags : null,
+      image_urls: imageUrls,
       comment: input.comment?.trim() || null,
-      image_urls: finalImageUrls,
     })
     .eq('id', reviewId)
     .eq('user_id', user.id);
@@ -209,7 +249,7 @@ export async function updateReview(
     return { ok: false, reason: 'DB_ERROR', message: error.message };
   }
 
-  return { ok: true, isVerified: false };
+  return { ok: true, isVerified: false, photoFailedCount: uploadResult.failedCount };
 }
 
 export type DeleteReviewResult =

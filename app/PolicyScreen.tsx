@@ -3,6 +3,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 import { RootStackParamList } from '../types/navigation';
+import ScreenHeader from '../components/ScreenHeader';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Policy'>;
 
@@ -118,7 +119,7 @@ const TERMS_SECTIONS = [
   },
 ];
 
-export default function PolicyScreen({ route }: Props) {
+export default function PolicyScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const type = route.params?.type ?? 'privacy';
   const isPrivacy = type === 'privacy';
@@ -128,11 +129,11 @@ export default function PolicyScreen({ route }: Props) {
   const effectiveDate = '시행일: 2026년 5월 1일';
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
-    >
-      <Text style={styles.title}>{heading}</Text>
+    <View style={styles.container}>
+      <ScreenHeader title={heading} onBack={() => navigation.goBack()} />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
+      >
       <Text style={styles.effectiveDate}>{effectiveDate}</Text>
 
       {sections.map((section, idx) => (
@@ -141,7 +142,8 @@ export default function PolicyScreen({ route }: Props) {
           <Text style={styles.sectionBody}>{section.body}</Text>
         </View>
       ))}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 

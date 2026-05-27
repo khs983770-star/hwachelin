@@ -9,10 +9,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 import { supabase } from '../lib/supabase';
+import { RootStackParamList } from '../types/navigation';
+import ScreenHeader from '../components/ScreenHeader';
 
 interface PendingReport {
   id: string;
@@ -34,6 +37,7 @@ interface PendingReport {
 }
 
 export default function AdminScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
   const [reports, setReports] = useState<PendingReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,14 +190,11 @@ export default function AdminScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24 }]}
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>제보 관리</Text>
-        <Text style={styles.subtitle}>대기 중인 제보: {reports.length}건</Text>
-      </View>
+    <View style={styles.container}>
+      <ScreenHeader title="제보 관리" onBack={() => navigation.goBack()} />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+      >
 
       {loading ? (
         <ActivityIndicator color={colors.orange} style={{ marginTop: 40 }} />
@@ -286,7 +287,8 @@ export default function AdminScreen() {
           );
         })
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
