@@ -200,7 +200,7 @@ export default function MyPage() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>내 활동</Text>
         <MenuRow
-          icon="★"
+          icon="✿"
           title="내가 평가한 화장실"
           subtitle="별점과 체크리스트"
           onPress={() => user && navigation.navigate('MyReviews')}

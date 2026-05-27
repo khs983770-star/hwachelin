@@ -129,7 +129,7 @@ export default function MyBookmarksScreen() {
               <View style={styles.bottom}>
                 <Text style={styles.rating}>
                   {item.avg_rating != null
-                    ? `★ ${item.avg_rating.toFixed(1)} (${item.review_count})`
+                    ? `✿ ${item.avg_rating.toFixed(1)} (${item.review_count})`
                     : '리뷰 없음'}
                 </Text>
                 <TouchableOpacity
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  rating: { fontSize: 12, color: colors.amber, fontWeight: '600' },
+  rating: { fontSize: 12, color: colors.brand[500], fontWeight: '600' },
   removeBtn: {
     paddingHorizontal: 10,
     paddingVertical: 5,

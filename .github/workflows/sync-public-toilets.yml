@@ -12,6 +12,7 @@ jobs:
     timeout-minutes: 15
     env:
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+      SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
       EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       PUBLIC_TOILET_REGION: ''

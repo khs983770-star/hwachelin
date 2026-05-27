@@ -23,11 +23,22 @@ interface MyReview {
   id: string;
   toilet_id: string;
   rating: number;
+  cleanliness_level: 'clean' | 'normal' | 'dirty' | null;
+  paper: boolean | null;
+  soap: boolean | null;
+  hand_dryer: boolean | null;
+  hand_tissue: boolean | null;
+  has_password: boolean | null;
+  bidet: boolean | null;
+  mood_tags: string[] | null;
+  image_urls: string[] | null;
   comment: string | null;
   is_verified: boolean;
   created_at: string;
   placeName: string;
   address: string;
+  toiletLat: number | null;
+  toiletLng: number | null;
 }
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
@@ -58,13 +69,24 @@ export default function MyReviewsScreen() {
         id,
         toilet_id,
         rating,
+        cleanliness_level,
+        paper,
+        soap,
+        hand_dryer,
+        hand_tissue,
+        has_password,
+        bidet,
+        mood_tags,
+        image_urls,
         comment,
         is_verified,
         created_at,
         toilets (
           places (
             name,
-            address
+            address,
+            lat,
+            lng
           )
         )
       `)
@@ -80,11 +102,22 @@ export default function MyReviewsScreen() {
             id: row.id,
             toilet_id: row.toilet_id,
             rating: Number(row.rating),
+            cleanliness_level: row.cleanliness_level ?? null,
+            paper: row.paper ?? null,
+            soap: row.soap ?? null,
+            hand_dryer: row.hand_dryer ?? null,
+            hand_tissue: row.hand_tissue ?? null,
+            has_password: row.has_password ?? null,
+            bidet: row.bidet ?? null,
+            mood_tags: row.mood_tags ?? null,
+            image_urls: row.image_urls ?? null,
             comment: row.comment,
             is_verified: row.is_verified,
             created_at: row.created_at,
             placeName: place?.name ?? '화장실',
             address: place?.address ?? '',
+            toiletLat: place?.lat ?? null,
+            toiletLng: place?.lng ?? null,
           };
         })
       );
@@ -127,7 +160,7 @@ export default function MyReviewsScreen() {
   const renderStars = (rating: number) => {
     return Array.from({ length: 5 }, (_, i) => (
       <Text key={i} style={[styles.star, i < Math.round(rating) && styles.starOn]}>
-        ★
+        ✿
       </Text>
     ));
   };
@@ -211,13 +244,41 @@ export default function MyReviewsScreen() {
                     day: 'numeric',
                   })}
                 </Text>
-                <TouchableOpacity
-                  style={styles.deleteBtn}
-                  onPress={() => handleDelete(review)}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Text style={styles.deleteBtnText}>삭제</Text>
-                </TouchableOpacity>
+                <View style={styles.actionBtns}>
+                  <TouchableOpacity
+                    style={styles.editBtn}
+                    onPress={() =>
+                      navigation.navigate('ReviewWrite', {
+                        toiletId: review.toilet_id,
+                        toiletName: review.placeName,
+                        reviewId: review.id,
+                        initialRating: review.rating,
+                        initialCleanlinessLevel: review.cleanliness_level,
+                        initialPaper: review.paper,
+                        initialSoap: review.soap,
+                        initialHandDryer: review.hand_dryer,
+                        initialHandTissue: review.hand_tissue,
+                        initialHasPassword: review.has_password,
+                        initialBidet: review.bidet,
+                        initialMoodTags: review.mood_tags,
+                        initialImageUrls: review.image_urls,
+                        initialComment: review.comment,
+                        toiletLat: review.toiletLat ?? undefined,
+                        toiletLng: review.toiletLng ?? undefined,
+                      })
+                    }
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  >
+                    <Text style={styles.editBtnText}>수정</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteBtn}
+                    onPress={() => handleDelete(review)}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  >
+                    <Text style={styles.deleteBtnText}>삭제</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </TouchableOpacity>
           ))
@@ -294,7 +355,7 @@ const styles = StyleSheet.create({
   },
   starRow: { flexDirection: 'row', gap: 1 },
   star: { fontSize: 13, color: '#D1D5DB' },
-  starOn: { color: colors.amber },
+  starOn: { color: colors.brand[500] },
   address: { fontSize: 12, color: colors.textSecondary, marginBottom: 8 },
   comment: {
     fontSize: 13,
@@ -309,6 +370,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   meta: { fontSize: 11, color: colors.textTertiary },
+  actionBtns: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  editBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 7,
+    backgroundColor: '#FFF0E9',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.orange,
+  },
+  editBtnText: { fontSize: 11, color: colors.orange, fontWeight: '700' },
   deleteBtn: {
     paddingHorizontal: 10,
     paddingVertical: 4,

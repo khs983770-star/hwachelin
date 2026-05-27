@@ -17,6 +17,8 @@ import MyReportsScreen from './app/MyReportsScreen';
 import OnboardingScreen, { ONBOARDING_DONE_KEY } from './app/OnboardingScreen';
 import AdminScreen from './app/AdminScreen';
 import PolicyScreen from './app/PolicyScreen';
+import PhotoGalleryScreen from './app/PhotoGalleryScreen';
+import AllReviewsScreen from './app/AllReviewsScreen';
 import Toast from './components/Toast';
 import { RootStackParamList } from './types/navigation';
 import { colors } from './constants/theme';
@@ -32,9 +34,7 @@ function BackButton({ onPress }: { onPress: () => void }) {
   );
 }
 
-function TabIcon({ name, focused }: { name: 'map' | 'gold' | 'profile'; focused: boolean }) {
-  const color = focused ? colors.orange : '#9F9393';
-
+function TabIcon({ name, focused }: { name: 'map' | 'gold'; focused: boolean }) {
   if (name === 'map') {
     return (
       <View style={styles.tabIconWrap}>
@@ -47,9 +47,10 @@ function TabIcon({ name, focused }: { name: 'map' | 'gold' | 'profile'; focused:
     );
   }
 
+  // 황금 트로피 — 컬러풀한 이모지 사용
   return (
     <View style={styles.tabIconWrap}>
-      {name === 'gold' ? <TrophyIcon color={color} /> : <ProfileIcon color={color} />}
+      <Text style={[styles.trophyEmoji, { opacity: focused ? 1 : 0.45 }]}>🏆</Text>
     </View>
   );
 }
@@ -113,13 +114,6 @@ function MainTabs() {
           tabBarIcon: ({ focused }) => <TabIcon name="gold" focused={focused} />,
         }}
       />
-      <Tab.Screen
-        name="마이페이지"
-        component={MyPageScreen}
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon name="profile" focused={focused} />,
-        }}
-      />
     </Tab.Navigator>
   );
 }
@@ -172,6 +166,11 @@ export default function App() {
             options={{ headerShown: false }}
           />
           <Stack.Screen
+            name="MyPage"
+            component={MyPageScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
             name="ToiletDetail"
             component={ToiletDetailScreen}
             options={{ headerShown: false }}
@@ -209,6 +208,16 @@ export default function App() {
           <Stack.Screen
             name="Policy"
             component={PolicyScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="PhotoGallery"
+            component={PhotoGalleryScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="AllReviews"
+            component={AllReviewsScreen}
             options={{ headerShown: false }}
           />
         </Stack.Navigator>
@@ -249,6 +258,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
   },
+  trophyEmoji: {
+    fontSize: 30,
+    lineHeight: 34,
+    includeFontPadding: false,
+    textAlign: 'center',
+  } as any,
   goldTabIconWrap: {
     width: 44,
     height: 50,

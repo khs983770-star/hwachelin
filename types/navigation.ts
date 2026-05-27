@@ -1,9 +1,13 @@
 export type RootStackParamList = {
   Onboarding: undefined;
   MainTabs: undefined;
+  MyPage: undefined;
   Admin: undefined;
   Policy: { type: 'privacy' | 'terms' };
   ToiletDetail: {
+    toiletId: string;
+  };
+  PhotoGallery: {
     toiletId: string;
   };
   MyBookmarks: undefined;
@@ -27,6 +31,10 @@ export type RootStackParamList = {
     /** GPS 50m 인증용 화장실 좌표 */
     toiletLat?: number;
     toiletLng?: number;
+  };
+  AllReviews: {
+    toiletId: string;
+    toiletName?: string;
   };
   Report: {
     toiletId?: string;

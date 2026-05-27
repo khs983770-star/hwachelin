@@ -109,7 +109,7 @@ export default function PhotoReviewModal({ review, initialIndex, onClose }: Prop
         {/* 하단 리뷰 정보 */}
         <View style={styles.reviewPanel}>
           <View style={styles.reviewHeaderRow}>
-            <Text style={styles.reviewRating}>★ {Number(review.rating).toFixed(1)}</Text>
+            <Text style={styles.reviewRating}>✿ {Number(review.rating).toFixed(1)}</Text>
             {review.is_verified && <Text style={styles.verifiedBadge}>✅ 현장 인증</Text>}
             <Text style={styles.reviewDate}>
               {new Date(review.created_at).toLocaleDateString('ko-KR')}
@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
   reviewRating: {
     fontSize: 16,
     fontWeight: '800',
-    color: colors.amber,
+    color: colors.brand[500],
   },
   verifiedBadge: {
     fontSize: 11,

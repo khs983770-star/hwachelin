@@ -1,6 +1,11 @@
 import * as Location from 'expo-location';
-import { readAsStringAsync } from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from './supabase';
+
+// 사진 업로드 사양 (기획서 기준)
+const PHOTO_MAX_WIDTH = 1280;
+const PHOTO_JPEG_QUALITY = 0.8;
+const PHOTO_MAX_BYTES = 10 * 1024 * 1024; // 10MB
 
 // ─── 비밀번호 의심 텍스트 필터 ───────────────────────────────────────────
 const SENSITIVE_PATTERNS = [
@@ -41,7 +46,10 @@ export function getDistanceMeters(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ─── GPS 50m 인증 여부 확인 ───────────────────────────────────────────────
+// ─── GPS 현장 인증 거리 임계값 (m) ───────────────────────────────────────
+export const VERIFY_DISTANCE_M = 100;
+
+// ─── GPS 현장 인증 여부 확인 (VERIFY_DISTANCE_M 이내) ───────────────────
 export async function checkIsVerified(
   toiletLat: number,
   toiletLng: number
@@ -56,13 +64,18 @@ export async function checkIsVerified(
       pos.coords.latitude, pos.coords.longitude,
       toiletLat, toiletLng
     );
-    return dist <= 50;
+    return dist <= VERIFY_DISTANCE_M;
   } catch {
     return false;
   }
 }
 
-// ─── 리뷰 이미지 업로드 (picker quality:0.8 압축 — 리사이즈는 dev client 재빌드 후 expo-image-manipulator로 추가 예정) ─────
+// ─── 리뷰 이미지 업로드 (기획 사양: 1280px 리사이즈 + JPEG 80% + 10MB 이내) ───
+// 처리 순서:
+// 1) expo-image-manipulator로 최대 1280px 리사이즈 + JPEG 0.8 압축
+// 2) fetch(uri).arrayBuffer()로 바이너리 변환 (RN-friendly, Hermes/fetch 호환)
+// 3) 10MB 초과 시 업로드 거부
+// 4) Supabase storage upload
 async function uploadReviewImages(
   userId: string,
   uris: string[]
@@ -73,21 +86,40 @@ async function uploadReviewImages(
 
   for (const uri of uris) {
     try {
-      const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-      const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? ext : 'jpg';
-      const filename = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${safeExt}`;
+      // 1) 리사이즈 + JPEG 압축 — 항상 .jpg로 통일
+      const manipulated = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: PHOTO_MAX_WIDTH } }],
+        { compress: PHOTO_JPEG_QUALITY, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const filename = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
 
-      const base64 = await readAsStringAsync(uri, { encoding: 'base64' });
-      const byteCharacters = atob(base64);
-      const byteArray = new Uint8Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteArray[i] = byteCharacters.charCodeAt(i);
+      // 2) ArrayBuffer 변환
+      const response = await fetch(manipulated.uri);
+      if (!response.ok) {
+        failedCount += 1;
+        lastError = `로컬 사진 읽기 실패 (${response.status})`;
+        continue;
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
+        failedCount += 1;
+        lastError = '사진 파일이 비어있어요';
+        continue;
       }
 
+      // 3) 10MB 초과 가드 (리사이즈 후 기준)
+      if (arrayBuffer.byteLength > PHOTO_MAX_BYTES) {
+        failedCount += 1;
+        lastError = `사진 용량이 너무 커요 (${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB)`;
+        continue;
+      }
+
+      // 4) 업로드
       const { data, error } = await supabase.storage
         .from('review-images')
-        .upload(filename, byteArray, {
-          contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+        .upload(filename, arrayBuffer, {
+          contentType: 'image/jpeg',
           upsert: false,
         });
 
@@ -141,94 +173,49 @@ export interface ReviewInput {
 }
 
 export type SubmitResult =
-  | { ok: true; isVerified: boolean; photoFailedCount?: number }
-  | { ok: false; reason: 'NOT_LOGGED_IN' | 'SENSITIVE_TEXT' | 'DB_ERROR'; message: string };
+  | { ok: true; isVerified: boolean; photoFailedCount?: number; photoFailedMessage?: string }
+  | { ok: false; reason: 'NOT_LOGGED_IN' | 'SENSITIVE_TEXT' | 'DB_ERROR' | 'NETWORK_ERROR'; message: string };
 
-export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
-  // 1. 로그인 확인
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { ok: false, reason: 'NOT_LOGGED_IN', message: '로그인이 필요해요' };
-  }
-
-  // 2. 비밀번호 의심 텍스트 차단
-  if (input.comment && containsSensitiveText(input.comment)) {
-    return {
-      ok: false,
-      reason: 'SENSITIVE_TEXT',
-      message: '비밀번호나 민감한 번호는 작성할 수 없어요.\n비밀번호 정보는 선택지 방식으로만 안내해 주세요.',
-    };
-  }
-
-  // 3. GPS 50m 인증
-  const isVerified =
-    input.toiletLat != null && input.toiletLng != null
-      ? await checkIsVerified(input.toiletLat, input.toiletLng)
-      : false;
-
-  // 4. 사진 업로드 (있을 때만)
-  const uploadResult = input.photoUris?.length
-    ? await uploadReviewImages(user.id, input.photoUris)
-    : { urls: [], failedCount: 0 };
-  const imageUrls = [...(input.existingImageUrls ?? []), ...uploadResult.urls];
-
-  // 5. Supabase insert
-  const { error } = await supabase.from('reviews').insert({
-    toilet_id: input.toiletId,
-    user_id: user.id,
-    rating: input.rating,
-    cleanliness_level: input.cleanlinessLevel ?? null,
-    cleanliness: input.cleanlinessLevel === 'clean',
-    paper: input.paper ?? null,
-    soap: input.soap ?? null,
-    hand_dryer: input.handDryer ?? null,
-    hand_tissue: input.handTissue ?? null,
-    has_password: input.hasPassword ?? null,
-    bidet: input.bidet ?? false,
-    security: null,
-    mood_tags: input.moodTags?.length ? input.moodTags : null,
-    image_urls: imageUrls,
-    comment: input.comment?.trim() || null,
-    is_verified: isVerified,
-  });
-
-  if (error) {
-    return { ok: false, reason: 'DB_ERROR', message: error.message };
-  }
-
-  return { ok: true, isVerified, photoFailedCount: uploadResult.failedCount };
+function isNetworkError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /network request failed|failed to fetch|fetch failed|network error/i.test(msg);
 }
 
-export async function updateReview(
-  reviewId: string,
-  input: Omit<ReviewInput, 'toiletId' | 'toiletLat' | 'toiletLng'>
-): Promise<SubmitResult> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { ok: false, reason: 'NOT_LOGGED_IN', message: '로그인이 필요해요' };
-  }
+export async function submitReview(input: ReviewInput): Promise<SubmitResult> {
+  try {
+    // 1. 로그인 확인
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, reason: 'NOT_LOGGED_IN', message: '로그인이 필요해요' };
+    }
 
-  if (input.comment && containsSensitiveText(input.comment)) {
-    return {
-      ok: false,
-      reason: 'SENSITIVE_TEXT',
-      message: '비밀번호나 민감한 번호는 작성할 수 없어요.\n비밀번호 정보는 선택지 방식으로만 안내해 주세요.',
-    };
-  }
+    // 2. 비밀번호 의심 텍스트 차단
+    if (input.comment && containsSensitiveText(input.comment)) {
+      return {
+        ok: false,
+        reason: 'SENSITIVE_TEXT',
+        message: '비밀번호나 민감한 번호는 작성할 수 없어요.\n비밀번호 정보는 선택지 방식으로만 안내해 주세요.',
+      };
+    }
 
-  // 새 사진 업로드
-  const uploadResult = input.photoUris?.length
-    ? await uploadReviewImages(user.id, input.photoUris)
-    : { urls: [], failedCount: 0 };
-  const imageUrls = [...(input.existingImageUrls ?? []), ...uploadResult.urls];
+    // 3. GPS 현장 인증 (VERIFY_DISTANCE_M 이내)
+    const isVerified =
+      input.toiletLat != null && input.toiletLng != null
+        ? await checkIsVerified(input.toiletLat, input.toiletLng)
+        : false;
 
-  const { error } = await supabase
-    .from('reviews')
-    .update({
+    // 4. 사진 업로드 (있을 때만)
+    const uploadResult = input.photoUris?.length
+      ? await uploadReviewImages(user.id, input.photoUris)
+      : { urls: [], failedCount: 0 };
+    const imageUrls = [...(input.existingImageUrls ?? []), ...uploadResult.urls];
+
+    // 5. Supabase insert
+    const { error } = await supabase.from('reviews').insert({
+      toilet_id: input.toiletId,
+      user_id: user.id,
       rating: input.rating,
       cleanliness_level: input.cleanlinessLevel ?? null,
       cleanliness: input.cleanlinessLevel === 'clean',
@@ -238,18 +225,92 @@ export async function updateReview(
       hand_tissue: input.handTissue ?? null,
       has_password: input.hasPassword ?? null,
       bidet: input.bidet ?? false,
+      security: null,
       mood_tags: input.moodTags?.length ? input.moodTags : null,
       image_urls: imageUrls,
       comment: input.comment?.trim() || null,
-    })
-    .eq('id', reviewId)
-    .eq('user_id', user.id);
+      is_verified: isVerified,
+    });
 
-  if (error) {
-    return { ok: false, reason: 'DB_ERROR', message: error.message };
+    if (error) {
+      return { ok: false, reason: 'DB_ERROR', message: error.message };
+    }
+
+    return {
+      ok: true,
+      isVerified,
+      photoFailedCount: uploadResult.failedCount,
+      photoFailedMessage: uploadResult.lastError,
+    };
+  } catch (e) {
+    if (isNetworkError(e)) {
+      return { ok: false, reason: 'NETWORK_ERROR', message: '인터넷 연결을 확인해 주세요' };
+    }
+    return { ok: false, reason: 'DB_ERROR', message: e instanceof Error ? e.message : String(e) };
   }
+}
 
-  return { ok: true, isVerified: false, photoFailedCount: uploadResult.failedCount };
+export async function updateReview(
+  reviewId: string,
+  input: Omit<ReviewInput, 'toiletId' | 'toiletLat' | 'toiletLng'>
+): Promise<SubmitResult> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, reason: 'NOT_LOGGED_IN', message: '로그인이 필요해요' };
+    }
+
+    if (input.comment && containsSensitiveText(input.comment)) {
+      return {
+        ok: false,
+        reason: 'SENSITIVE_TEXT',
+        message: '비밀번호나 민감한 번호는 작성할 수 없어요.\n비밀번호 정보는 선택지 방식으로만 안내해 주세요.',
+      };
+    }
+
+    // 새 사진 업로드
+    const uploadResult = input.photoUris?.length
+      ? await uploadReviewImages(user.id, input.photoUris)
+      : { urls: [], failedCount: 0 };
+    const imageUrls = [...(input.existingImageUrls ?? []), ...uploadResult.urls];
+
+    const { error } = await supabase
+      .from('reviews')
+      .update({
+        rating: input.rating,
+        cleanliness_level: input.cleanlinessLevel ?? null,
+        cleanliness: input.cleanlinessLevel === 'clean',
+        paper: input.paper ?? null,
+        soap: input.soap ?? null,
+        hand_dryer: input.handDryer ?? null,
+        hand_tissue: input.handTissue ?? null,
+        has_password: input.hasPassword ?? null,
+        bidet: input.bidet ?? false,
+        mood_tags: input.moodTags?.length ? input.moodTags : null,
+        image_urls: imageUrls,
+        comment: input.comment?.trim() || null,
+      })
+      .eq('id', reviewId)
+      .eq('user_id', user.id);
+
+    if (error) {
+      return { ok: false, reason: 'DB_ERROR', message: error.message };
+    }
+
+    return {
+      ok: true,
+      isVerified: false,
+      photoFailedCount: uploadResult.failedCount,
+      photoFailedMessage: uploadResult.lastError,
+    };
+  } catch (e) {
+    if (isNetworkError(e)) {
+      return { ok: false, reason: 'NETWORK_ERROR', message: '인터넷 연결을 확인해 주세요' };
+    }
+    return { ok: false, reason: 'DB_ERROR', message: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 export type DeleteReviewResult =

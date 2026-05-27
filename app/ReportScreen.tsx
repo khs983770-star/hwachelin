@@ -3,13 +3,13 @@ import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { colors } from '../constants/theme';
@@ -36,9 +36,11 @@ export default function ReportScreen({ route, navigation }: Props) {
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const isNewToilet = reportType === 'new_toilet';
+
   const title = useMemo(
-    () => (reportType === 'new_toilet' ? '새 화장실 제보' : '정보 수정 제보'),
-    [reportType]
+    () => (isNewToilet ? '새 화장실 제보' : '정보 수정 제보'),
+    [isNewToilet]
   );
 
   const submit = async () => {
@@ -80,10 +82,9 @@ export default function ReportScreen({ route, navigation }: Props) {
       return;
     }
 
-    const successMsg =
-      reportType === 'new_toilet'
-        ? '화장실이 바로 등록됐어요! 지도에서 확인해보세요 🚽'
-        : '화장실 정보가 수정됐어요!';
+    const successMsg = isNewToilet
+      ? '화장실이 바로 등록됐어요! 지도에서 확인해보세요 🚽'
+      : '화장실 정보가 수정됐어요!';
     Alert.alert('감사해요', successMsg, [
       { text: '확인', onPress: () => navigation.goBack() },
     ]);
@@ -92,119 +93,124 @@ export default function ReportScreen({ route, navigation }: Props) {
   return (
     <View style={styles.container}>
       <ScreenHeader title={title} onBack={() => navigation.goBack()} />
-      <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.segment}>
+      <KeyboardAwareScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        enableOnAndroid
+        extraScrollHeight={20}
+      >
+        <Field label="장소명">
+          {isNewToilet ? (
+            <View style={styles.readonlyBox}>
+              <Text style={placeName ? styles.readonlyText : styles.readonlyPlaceholder}>
+                {placeName || '검색으로 선택된 장소'}
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              value={placeName}
+              onChangeText={setPlaceName}
+              placeholder="예: 서울시청 1층 화장실"
+              placeholderTextColor={colors.textTertiary}
+              style={styles.input}
+            />
+          )}
+        </Field>
+
+        <Field label="주소">
+          {isNewToilet ? (
+            <View style={styles.readonlyBox}>
+              <Text style={address ? styles.readonlyText : styles.readonlyPlaceholder}>
+                {address || '검색으로 선택된 주소'}
+              </Text>
+            </View>
+          ) : (
+            <TextInput
+              value={address}
+              onChangeText={setAddress}
+              placeholder="주소나 위치 설명"
+              placeholderTextColor={colors.textTertiary}
+              style={styles.input}
+            />
+          )}
+        </Field>
+
+        <Field label="층수 (선택)">
+          <TextInput
+            value={floor}
+            onChangeText={setFloor}
+            placeholder="예: 1층, B1"
+            placeholderTextColor={colors.textTertiary}
+            returnKeyType="done"
+            style={styles.input}
+          />
+        </Field>
+
+        <Field label="이용 조건">
+          <View style={styles.chipRow}>
+            {accessTypes.map((type) => (
+              <Chip key={type} label={type} selected={accessType === type} onPress={() => setAccessType(type)} />
+            ))}
+          </View>
+        </Field>
+
+        <Field label="성별 구분">
+          <View style={styles.chipRow}>
+            {genderTypes.map((type) => (
+              <Chip key={type} label={type} selected={genderType === type} onPress={() => setGenderType(type)} />
+            ))}
+          </View>
+        </Field>
+
         <TouchableOpacity
-          style={[styles.segmentButton, reportType === 'new_toilet' && styles.segmentButtonOn]}
-          onPress={() => setReportType('new_toilet')}
+          style={[styles.toggleRow, hasPassword && styles.toggleRowOn]}
+          onPress={() => setHasPassword((current) => !current)}
+          activeOpacity={0.8}
         >
-          <Text style={[styles.segmentText, reportType === 'new_toilet' && styles.segmentTextOn]}>
-            신규
+          <View style={[styles.toggleDot, hasPassword && styles.toggleDotOn]} />
+          <Text style={[styles.toggleText, hasPassword && styles.toggleTextOn]}>
+            비밀번호 또는 출입 제한이 있어요
           </Text>
         </TouchableOpacity>
+
+        <Field label="운영시간 (선택)">
+          <TextInput
+            value={operatingHours}
+            onChangeText={setOperatingHours}
+            placeholder="예: 09:00~22:00 / 주말 휴무 / 24시간"
+            placeholderTextColor={colors.textTertiary}
+            returnKeyType="done"
+            style={styles.input}
+          />
+        </Field>
+
+        <Field label="메모 (선택)">
+          <TextInput
+            value={comment}
+            onChangeText={setComment}
+            placeholder="찾는 법, 고장 여부 등을 적어주세요. 비밀번호 숫자는 적지 마세요."
+            placeholderTextColor={colors.textTertiary}
+            multiline
+            maxLength={300}
+            textAlignVertical="top"
+            style={[styles.input, styles.memo]}
+          />
+        </Field>
+
         <TouchableOpacity
-          style={[styles.segmentButton, reportType === 'correction' && styles.segmentButtonOn]}
-          onPress={() => setReportType('correction')}
+          style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+          onPress={submit}
+          disabled={submitting}
+          activeOpacity={0.85}
         >
-          <Text style={[styles.segmentText, reportType === 'correction' && styles.segmentTextOn]}>
-            수정
-          </Text>
+          {submitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitText}>제보 접수하기</Text>
+          )}
         </TouchableOpacity>
-      </View>
-
-      <Field label="장소명">
-        <TextInput
-          value={placeName}
-          onChangeText={setPlaceName}
-          placeholder="예: 서울시청 1층 화장실"
-          placeholderTextColor={colors.textTertiary}
-          style={styles.input}
-        />
-      </Field>
-
-      <Field label="주소">
-        <TextInput
-          value={address}
-          onChangeText={setAddress}
-          placeholder="주소나 위치 설명"
-          placeholderTextColor={colors.textTertiary}
-          style={styles.input}
-        />
-      </Field>
-
-      <Field label="층수">
-        <TextInput
-          value={floor}
-          onChangeText={setFloor}
-          placeholder="예: 1층, B1"
-          placeholderTextColor={colors.textTertiary}
-          style={styles.input}
-        />
-      </Field>
-
-      <Field label="이용 조건">
-        <View style={styles.chipRow}>
-          {accessTypes.map((type) => (
-            <Chip key={type} label={type} selected={accessType === type} onPress={() => setAccessType(type)} />
-          ))}
-        </View>
-      </Field>
-
-      <Field label="성별 구분">
-        <View style={styles.chipRow}>
-          {genderTypes.map((type) => (
-            <Chip key={type} label={type} selected={genderType === type} onPress={() => setGenderType(type)} />
-          ))}
-        </View>
-      </Field>
-
-      <TouchableOpacity
-        style={[styles.toggleRow, hasPassword && styles.toggleRowOn]}
-        onPress={() => setHasPassword((current) => !current)}
-        activeOpacity={0.8}
-      >
-        <View style={[styles.toggleDot, hasPassword && styles.toggleDotOn]} />
-        <Text style={[styles.toggleText, hasPassword && styles.toggleTextOn]}>
-          비밀번호 또는 출입 제한이 있어요
-        </Text>
-      </TouchableOpacity>
-
-      <Field label="운영시간">
-        <TextInput
-          value={operatingHours}
-          onChangeText={setOperatingHours}
-          placeholder="예: 09:00~22:00 / 주말 휴무 / 24시간"
-          placeholderTextColor={colors.textTertiary}
-          style={styles.input}
-        />
-      </Field>
-
-      <Field label="메모">
-        <TextInput
-          value={comment}
-          onChangeText={setComment}
-          placeholder="운영시간, 찾는 법, 고장 여부 등을 적어주세요. 비밀번호 숫자는 적지 마세요."
-          placeholderTextColor={colors.textTertiary}
-          multiline
-          maxLength={300}
-          textAlignVertical="top"
-          style={[styles.input, styles.memo]}
-        />
-      </Field>
-
-      <TouchableOpacity
-        style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-        onPress={submit}
-        disabled={submitting}
-        activeOpacity={0.85}
-      >
-        {submitting ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.submitText}>제보 접수하기</Text>
-        )}
-      </TouchableOpacity>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
@@ -229,17 +235,6 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.backgroundPrimary },
   content: { padding: 16, paddingBottom: 36 },
-  segment: {
-    flexDirection: 'row',
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 10,
-    padding: 3,
-    marginBottom: 16,
-  },
-  segmentButton: { flex: 1, height: 36, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  segmentButtonOn: { backgroundColor: colors.orange },
-  segmentText: { fontSize: 13, color: colors.textSecondary, fontWeight: '700' },
-  segmentTextOn: { color: '#fff' },
   field: { marginBottom: 14 },
   label: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 7 },
   input: {
@@ -254,6 +249,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   memo: { minHeight: 104, lineHeight: 20 },
+  readonlyBox: {
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderTertiary,
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  readonlyText: { fontSize: 14, color: colors.textPrimary },
+  readonlyPlaceholder: { fontSize: 14, color: colors.textTertiary },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   chip: {
     minHeight: 34,

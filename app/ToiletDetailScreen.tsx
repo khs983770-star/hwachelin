@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Image,
   RefreshControl,
   ScrollView,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 import ScreenHeader from '../components/ScreenHeader';
 import PhotoReviewModal from '../components/PhotoReviewModal';
+import BottomSheetMenu from '../components/BottomSheetMenu';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { getToiletDetail } from '../lib/toiletService';
@@ -30,6 +32,16 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ToiletDetail'>;
 
 type ToiletDetail = NonNullable<Awaited<ReturnType<typeof getToiletDetail>>>;
 
+// 상단 사진 갤러리: 4열 × 2줄 정확한 픽셀 계산
+const SCREEN_W = Dimensions.get('window').width;
+const TOP_GALLERY_CONTENT_PADDING = 16;
+const TOP_GALLERY_GAP = 4;
+const TOP_GALLERY_COLS = 4;
+const TOP_GALLERY_CELL_SIZE = Math.floor(
+  (SCREEN_W - TOP_GALLERY_CONTENT_PADDING * 2 - TOP_GALLERY_GAP * (TOP_GALLERY_COLS - 1)) /
+    TOP_GALLERY_COLS
+);
+
 export default function ToiletDetailScreen({ route, navigation }: Props) {
   const { toiletId } = route.params;
   const [detail, setDetail] = useState<ToiletDetail | null>(null);
@@ -45,7 +57,57 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
   const [helpfulCounts, setHelpfulCounts] = useState<Record<string, number>>({});
   const [myHelpfulIds, setMyHelpfulIds] = useState<Set<string>>(new Set());
   const [helpfulBusy, setHelpfulBusy] = useState<Set<string>>(new Set());
+  const scrollRef = useRef<ScrollView>(null);
+  const reviewSectionY = useRef<number>(0);
+  const shouldScrollToReviews = useRef(false);
+  type ReviewSortKey = 'latest' | 'oldest' | 'rating-high' | 'rating-low' | 'popular';
+  const REVIEW_SORT_OPTIONS: { key: ReviewSortKey; label: string }[] = [
+    { key: 'latest',      label: '최신순' },
+    { key: 'oldest',      label: '오래된순' },
+    { key: 'rating-high', label: '별점높은순' },
+    { key: 'rating-low',  label: '별점낮은순' },
+    { key: 'popular',     label: '도움된순' },
+  ];
+  const [reviewSort, setReviewSort] = useState<ReviewSortKey>('latest');
+  const [sortSheetOpen, setSortSheetOpen] = useState(false);
+  const sortLabel =
+    REVIEW_SORT_OPTIONS.find((o) => o.key === reviewSort)?.label ?? '최신순';
 
+  const myReview = useMemo(
+    () => (currentUserId ? (detail?.reviews as Review[] | undefined)?.find((r) => r.user_id === currentUserId) : undefined),
+    [currentUserId, detail]
+  );
+
+  const reviews = useMemo(() => {
+    if (!detail) return [];
+    const base = [...(detail.reviews as Review[])];
+    const tieByLatest = (a: Review, b: Review) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    if (reviewSort === 'oldest') {
+      return base.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    }
+    if (reviewSort === 'rating-high') {
+      return base.sort((a, b) => {
+        const diff = Number(b.rating) - Number(a.rating);
+        return diff !== 0 ? diff : tieByLatest(a, b);
+      });
+    }
+    if (reviewSort === 'rating-low') {
+      return base.sort((a, b) => {
+        const diff = Number(a.rating) - Number(b.rating);
+        return diff !== 0 ? diff : tieByLatest(a, b);
+      });
+    }
+    if (reviewSort === 'popular') {
+      return base.sort((a, b) => {
+        const diff = (helpfulCounts[b.id] ?? 0) - (helpfulCounts[a.id] ?? 0);
+        return diff !== 0 ? diff : tieByLatest(a, b);
+      });
+    }
+    return base.sort(tieByLatest);
+  }, [detail, reviewSort, helpfulCounts]);
+
+  const openSortMenu = () => setSortSheetOpen(true);
 
   const doToggleBookmark = async () => {
     const result = await toggleBookmark(toiletId);
@@ -163,6 +225,12 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
           setMyHelpfulIds(new Set());
         }
         setLoading(false);
+        if (active && shouldScrollToReviews.current) {
+          shouldScrollToReviews.current = false;
+          setTimeout(() => {
+            scrollRef.current?.scrollTo({ y: reviewSectionY.current, animated: true });
+          }, 150);
+        }
       })();
 
       return () => {
@@ -216,9 +284,6 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
   const place = Array.isArray(detail.places) ? detail.places[0] : detail.places;
   const ratingText = detail.avg_rating != null ? detail.avg_rating.toFixed(1) : '-';
   const reviewCount = detail.review_count ?? 0;
-  const reviews = [...(detail.reviews as Review[])].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
 
   // ─── 갤러리: 모든 리뷰 사진을 평탄화 + reviewId/index 매핑 ─────────────
   type PhotoEntry = { url: string; reviewId: string; imageIndex: number };
@@ -242,6 +307,14 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
     normal: '😐 보통이에요',
     dirty: '🗑 지저분해요',
   };
+  const MOOD_TAG_LABELS: Record<string, string> = {
+    noSmell:          '냄새 없어요',
+    brightLight:      '조명 밝아요',
+    goodVentilation:  '환기 잘 돼요',
+    sturdyPartition:  '칸막이 튼튼해요',
+    crowded:          '사람 많아요',
+    waitingLine:      '대기줄 있어요',
+  };
   const SUPPLY_CHIPS: { key: string; trueLabel: string; falseLabel: string }[] = [
     { key: 'paper',        trueLabel: '🧻 휴지 있음',          falseLabel: '🧻 휴지 없음' },
     { key: 'soap',         trueLabel: '🧴 비누 있음',          falseLabel: '🧴 비누 없음' },
@@ -264,6 +337,7 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
         headerRight={bookmarkButton}
       />
       <ScrollView
+        ref={scrollRef}
         style={styles.container}
         contentContainerStyle={styles.content}
         refreshControl={
@@ -307,38 +381,40 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
         </View>
       </View>
 
-      {/* ─── 사진 갤러리 (최대 8장 + 더보기) ─── */}
+      {/* ─── 사진 갤러리 (2x4 그리드, 최대 8장 + 더보기) ─── */}
       {allPhotos.length > 0 && (
         <View style={styles.section}>
           <View style={styles.galleryHeader}>
             <Text style={styles.sectionTitle}>사진</Text>
             <Text style={styles.gallerySubtitle}>리뷰 사진 {allPhotos.length}장</Text>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.galleryRow}
-          >
+          <View style={styles.galleryGrid}>
             {visiblePhotos.map((p, i) => {
               const isOverlayCell = i === TOP_GALLERY_LIMIT - 1 && extraPhotoCount > 0;
               return (
                 <TouchableOpacity
                   key={`${p.reviewId}-${p.imageIndex}-${p.url}`}
                   activeOpacity={0.85}
-                  onPress={() => openGallery(p.reviewId, p.imageIndex)}
-                  style={styles.galleryItem}
+                  onPress={() => {
+                    if (isOverlayCell) {
+                      navigation.navigate('PhotoGallery', { toiletId });
+                    } else {
+                      openGallery(p.reviewId, p.imageIndex);
+                    }
+                  }}
+                  style={styles.galleryCell}
                 >
                   <Image source={{ uri: p.url }} style={styles.galleryImage} />
                   {isOverlayCell && (
-                    <View style={styles.galleryMore}>
-                      <Text style={styles.galleryMoreText}>+{extraPhotoCount}</Text>
-                      <Text style={styles.galleryMoreSub}>더보기</Text>
+                    <View style={styles.galleryMoreOverlay}>
+                      <Text style={styles.galleryMoreCount}>{allPhotos.length}</Text>
+                      <Text style={styles.galleryMoreLabel}>더보기</Text>
                     </View>
                   )}
                 </TouchableOpacity>
               );
             })}
-          </ScrollView>
+          </View>
         </View>
       )}
 
@@ -415,17 +491,36 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
         onPress={() =>
           requireLogin({
             onAuthed: () =>
-              navigation.navigate('ReviewWrite', {
-                toiletId,
-                toiletName: place?.name ?? '화장실',
-                toiletLat: place?.lat,
-                toiletLng: place?.lng,
-              }),
+              myReview
+                ? navigation.navigate('ReviewWrite', {
+                    toiletId,
+                    toiletName: place?.name ?? '화장실',
+                    toiletLat: place?.lat,
+                    toiletLng: place?.lng,
+                    reviewId: myReview.id,
+                    initialRating: myReview.rating,
+                    initialCleanlinessLevel: myReview.cleanliness_level ?? null,
+                    initialPaper: myReview.paper,
+                    initialSoap: myReview.soap,
+                    initialHandDryer: myReview.hand_dryer ?? null,
+                    initialHandTissue: myReview.hand_tissue ?? null,
+                    initialBidet: myReview.bidet,
+                    initialHasPassword: myReview.has_password ?? null,
+                    initialMoodTags: myReview.mood_tags ?? [],
+                    initialImageUrls: myReview.image_urls ?? [],
+                    initialComment: myReview.comment ?? '',
+                  })
+                : navigation.navigate('ReviewWrite', {
+                    toiletId,
+                    toiletName: place?.name ?? '화장실',
+                    toiletLat: place?.lat,
+                    toiletLng: place?.lng,
+                  }),
           })
         }
         activeOpacity={0.85}
       >
-        <Text style={styles.primaryButtonText}>리뷰 작성하기</Text>
+        <Text style={styles.primaryButtonText}>{myReview ? '내 리뷰 수정하기' : '리뷰 작성하기'}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -446,14 +541,36 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
       </TouchableOpacity>
 
       {reviews.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>리뷰</Text>
-          {reviews.map((review) => {
+        <View
+          style={styles.section}
+          onLayout={(e) => { reviewSectionY.current = e.nativeEvent.layout.y; }}
+        >
+          <View style={styles.reviewSortHeader}>
+            <Text style={styles.sectionTitle}>리뷰</Text>
+            <TouchableOpacity
+              onPress={openSortMenu}
+              style={styles.sortTrigger}
+              activeOpacity={0.7}
+              hitSlop={8}
+            >
+              <Text style={styles.sortTriggerText}>{sortLabel}</Text>
+              <Text style={styles.sortTriggerCaret}>▾</Text>
+            </TouchableOpacity>
+          </View>
+          {reviews.slice(0, 10).map((review) => {
             const isMine = currentUserId === review.user_id;
             return (
               <View key={review.id} style={styles.reviewCard}>
                 <View style={styles.reviewHeader}>
-                  <Text style={styles.reviewRating}>★ {Number(review.rating).toFixed(1)}</Text>
+                  <View style={styles.reviewHeaderLeft}>
+                    <Text style={styles.reviewRating}>✿ {Number(review.rating).toFixed(1)}</Text>
+                    <Text style={styles.reviewDate}>
+                      {new Date(review.created_at).toLocaleString('ko-KR', {
+                        year: 'numeric', month: '2-digit', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit', hour12: false,
+                      })}
+                    </Text>
+                  </View>
                   {isMine && <Text style={styles.myReviewBadge}>내 리뷰</Text>}
                 </View>
                 {/* 청결도 */}
@@ -489,6 +606,18 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
                     </View>
                   ) : null;
                 })()}
+                {/* 분위기 태그 */}
+                {(review as any).mood_tags?.length > 0 && (
+                  <View style={styles.reviewChips}>
+                    {((review as any).mood_tags as string[]).map((tag) => (
+                      <View key={tag} style={[styles.reviewChip, styles.reviewChipMood]}>
+                        <Text style={[styles.reviewChipText, styles.reviewChipTextMood]}>
+                          {MOOD_TAG_LABELS[tag] ?? tag}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
                 {!!review.comment && <Text style={styles.reviewComment}>{review.comment}</Text>}
                 {review.image_urls?.length > 0 && (
                   <TouchableOpacity
@@ -508,11 +637,7 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
                 )}
                 <View style={styles.reviewFooter}>
                   <Text style={styles.reviewMeta}>
-                    {review.is_verified ? '✅ 현장 인증 · ' : ''}
-                    {new Date(review.created_at).toLocaleString('ko-KR', {
-                      year: 'numeric', month: '2-digit', day: '2-digit',
-                      hour: '2-digit', minute: '2-digit', hour12: false,
-                    })}
+                    {review.is_verified ? '✅ 현장 인증' : ''}
                   </Text>
                   {!isMine && (
                     <TouchableOpacity
@@ -558,6 +683,7 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
                           initialHandDryer: (review as any).hand_dryer ?? null,
                           initialHandTissue: (review as any).hand_tissue ?? null,
                           initialHasPassword: (review as any).has_password ?? null,
+                          initialMoodTags: (review as any).mood_tags ?? [],
                           initialComment: review.comment ?? '',
                           toiletLat: place?.lat,
                           toiletLng: place?.lng,
@@ -577,6 +703,23 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
               </View>
             );
           })}
+          {reviews.length > 10 && (
+            <TouchableOpacity
+              style={styles.moreReviewsBtn}
+              onPress={() => {
+                shouldScrollToReviews.current = true;
+                navigation.navigate('AllReviews', {
+                  toiletId,
+                  toiletName: place?.name ?? '화장실',
+                });
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.moreReviewsBtnText}>
+                리뷰 더보기 ({reviews.length - 10}개 더)
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -586,6 +729,15 @@ export default function ToiletDetailScreen({ route, navigation }: Props) {
       review={galleryReview}
       initialIndex={galleryView?.imageIndex ?? 0}
       onClose={closeGallery}
+    />
+
+    <BottomSheetMenu
+      visible={sortSheetOpen}
+      title="리뷰 정렬"
+      options={REVIEW_SORT_OPTIONS}
+      selectedKey={reviewSort}
+      onSelect={(key) => setReviewSort(key as ReviewSortKey)}
+      onClose={() => setSortSheetOpen(false)}
     />
     </View>
   );
@@ -686,14 +838,14 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 11, color: colors.textTertiary },
   divider: { width: StyleSheet.hairlineWidth, height: 34, backgroundColor: colors.borderTertiary },
   section: {
-    marginBottom: 14,
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textTertiary,
-    marginBottom: 8,
-    letterSpacing: 0.4,
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginBottom: 12,
+    letterSpacing: 0,
   },
   facGrid: {
     flexDirection: 'row',
@@ -788,7 +940,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-  reviewRating: { fontSize: 14, color: colors.amber, fontWeight: '700' },
+  reviewHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    flex: 1,
+  },
+  reviewRating: { fontSize: 14, color: colors.brand[500], fontWeight: '700' },
+  reviewDate: {
+    fontSize: 11,
+    color: colors.textTertiary,
+    fontWeight: '600',
+  },
   myReviewBadge: {
     fontSize: 11,
     color: colors.orange,
@@ -811,24 +974,33 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     fontWeight: '600',
   },
-  galleryRow: { gap: 6, paddingRight: 14 },
-  galleryItem: {
-    width: 88,
-    height: 88,
-    borderRadius: 10,
+  galleryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: TOP_GALLERY_GAP,
+  },
+  galleryCell: {
+    width: TOP_GALLERY_CELL_SIZE,
+    height: TOP_GALLERY_CELL_SIZE,
+    borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: colors.backgroundSecondary,
     position: 'relative',
   },
   galleryImage: { width: '100%', height: '100%' },
-  galleryMore: {
+  galleryMoreOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(15,82,186,0.78)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  galleryMoreText: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  galleryMoreSub: { color: 'rgba(255,255,255,0.85)', fontSize: 10, fontWeight: '700', marginTop: 2 },
+  galleryMoreCount: { color: '#fff', fontSize: 20, fontWeight: '900' },
+  galleryMoreLabel: {
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
 
   // ─── 리뷰 대표 사진 ─────────────────────────────────────────────────────
   reviewPhotoWrap: {
@@ -925,6 +1097,59 @@ const styles = StyleSheet.create({
   reviewChipTextCleanliness: {
     color: '#6D28D9',
   },
+  reviewChipMood: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FED7AA',
+    borderWidth: 1,
+  },
+  reviewChipTextMood: {
+    color: '#C2410C',
+  },
+  moreReviewsBtn: {
+    marginTop: 4,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.orange,
+    alignItems: 'center',
+    backgroundColor: '#FFF7F3',
+  },
+  moreReviewsBtnText: {
+    fontSize: 14,
+    color: colors.orange,
+    fontWeight: '700',
+  },
+  reviewSortHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  sortTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.borderSecondary,
+    backgroundColor: colors.backgroundPrimary,
+  },
+  sortTriggerText: { fontSize: 12, color: colors.textPrimary, fontWeight: '700' },
+  sortTriggerCaret: { fontSize: 11, color: colors.textSecondary, fontWeight: '700' },
+  reviewSortChips: { flexDirection: 'row', gap: 5 },
+  sortChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.borderSecondary,
+    backgroundColor: '#fff',
+  },
+  sortChipOn: { borderColor: colors.orange, backgroundColor: '#FFF0E9' },
+  sortChipText: { fontSize: 12, color: colors.textSecondary },
+  sortChipTextOn: { color: colors.orange, fontWeight: '700' },
   stallGrid: {
     flexDirection: 'row',
     gap: 8,

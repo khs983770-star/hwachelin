@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Keyboard,
-  KeyboardAvoidingView,
   Linking,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -24,10 +24,12 @@ import {
   updateReview,
   containsRealtimeBlocked,
   getDistanceMeters,
+  VERIFY_DISTANCE_M,
 } from '../lib/reviewService';
 import { signInWithKakao } from '../lib/authService';
 import ScreenHeader from '../components/ScreenHeader';
 import { showToast } from '../components/Toast';
+import PhotoSourceSheet from '../components/PhotoSourceSheet';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ReviewWrite'>;
 
@@ -78,6 +80,9 @@ function scoreLabel(rating: number | null): string {
 
 const MAX_PHOTOS = 5;
 const STAR_SIZE = 44;
+// ✿ 글리프 자연 너비 ≈ fontSize × 0.85 (좌우 여백 포함)
+// 시각적 절반을 정확히 자르려면 클립 영역도 이 비율을 사용해야 함.
+const STAR_GLYPH_W = STAR_SIZE * 0.85;
 
 export default function ReviewWriteScreen({ route, navigation }: Props) {
   const {
@@ -99,7 +104,7 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
     initialComment,
   } = route.params;
   const isEditing = !!reviewId;
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
 
   // ─── 단계 ───────────────────────────────────────────────────────────────
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
@@ -129,6 +134,7 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [isLocationVerified, setIsLocationVerified] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
 
   // ─── 1단계 유효성 ───────────────────────────────────────────────────────
   const errors = {
@@ -137,6 +143,47 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
     facility: Object.values(facility).some((v) => v == null),
   };
   const step1Valid = !errors.rating && !errors.cleanliness && !errors.facility;
+
+  // ─── 입력 여부 감지 (뒤로가기 가드용) ────────────────────────────────────
+  const step1HasInput =
+    rating !== null ||
+    cleanlinessLevel !== null ||
+    Object.values(facility).some((v) => v !== null);
+
+  const step2HasInput =
+    moodTags.length > 0 ||
+    memo.trim().length > 0 ||
+    photoUris.length > 0 ||
+    existingImageUrls.length !== (initialImageUrls ?? []).length;
+
+  // refs for stale-closure-safe navigation listener
+  const currentStepRef = useRef(currentStep);
+  const step1HasInputRef = useRef(step1HasInput);
+  const step2HasInputRef = useRef(step2HasInput);
+  useEffect(() => { currentStepRef.current = currentStep; }, [currentStep]);
+  useEffect(() => { step1HasInputRef.current = step1HasInput; }, [step1HasInput]);
+  useEffect(() => { step2HasInputRef.current = step2HasInput; }, [step2HasInput]);
+
+  // ─── 백그라운드 30분 타임아웃 ───────────────────────────────────────────
+  const BACKGROUND_TIMEOUT_MS = 30 * 60 * 1000;
+  const backgroundedAtRef = useRef<number | null>(null);
+  const isTimeoutExitRef = useRef(false);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        backgroundedAtRef.current = Date.now();
+      } else if (nextState === 'active') {
+        const since = backgroundedAtRef.current;
+        backgroundedAtRef.current = null;
+        if (since !== null && Date.now() - since >= BACKGROUND_TIMEOUT_MS) {
+          isTimeoutExitRef.current = true;
+          navigation.goBack();
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [navigation]);
 
   // ─── 별점 탭 (0.5 단위) ─────────────────────────────────────────────────
   const tapStar = (value: number, half: boolean) => {
@@ -156,7 +203,7 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
     setRating(next);
   };
   const canDecrement = rating != null && rating > 0.5;
-  const canIncrement = (rating ?? 0) < 5.0;
+  const canIncrement = rating != null && rating < 5.0;
 
   // ─── 시설 토글 ──────────────────────────────────────────────────────────
   const toggleFacility = (key: FacilityKey, value: boolean) => {
@@ -176,43 +223,82 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
   // ─── 한마디 실시간 비밀번호 차단 ────────────────────────────────────────
   const handleMemoChange = (text: string) => {
     if (containsRealtimeBlocked(text)) {
-      // 차단된 입력 → 이전 값으로 롤백 + 토스트 안내
       setMemo(memoLastValid);
       showToast('비밀번호로 의심되는 문구는 입력할 수 없어요');
       return;
+    }
+    // 붙여넣기 등으로 여러 글자가 한번에 입력돼 300자 한도에 도달한 경우
+    if (text.length >= 300 && text.length - memo.length > 1) {
+      showToast('최대 300자까지 입력할 수 있어요');
     }
     setMemo(text);
     setMemoLastValid(text);
   };
 
   // ─── 사진 첨부 ──────────────────────────────────────────────────────────
-  const pickPhoto = async () => {
+  const pickPhoto = () => {
     const totalCount = existingImageUrls.length + photoUris.length;
     if (totalCount >= MAX_PHOTOS) {
       Alert.alert('사진은 최대 5장까지 첨부할 수 있어요');
       return;
     }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    setPhotoSheetOpen(true);
+  };
+
+  const showPermissionAlert = (kind: 'camera' | 'library') => {
+    const title = kind === 'camera' ? '카메라 접근 권한이 필요해요' : '사진 접근 권한이 필요해요';
+    Alert.alert(title, '설정에서 허용해 주세요.', [
+      { text: '취소', style: 'cancel' },
+      { text: '설정으로 이동', onPress: () => Linking.openSettings() },
+    ]);
+  };
+
+  const openCamera = async () => {
+    const totalCount = existingImageUrls.length + photoUris.length;
+    if (totalCount >= MAX_PHOTOS) return;
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        '사진 권한이 필요해요',
-        '설정에서 사진 접근 권한을 허용해 주세요.',
-        [
-          { text: '취소', style: 'cancel' },
-          { text: '설정 열기', onPress: () => Linking.openSettings() },
-        ]
-      );
+      showPermissionAlert('camera');
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      selectionLimit: MAX_PHOTOS - totalCount,
-      quality: 0.8, // picker 단계 JPEG 압축 (1280px 리사이즈는 dev client 재빌드 후 추가)
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const newUris = result.assets.map((a) => a.uri);
-    setPhotoUris((prev) => [...prev, ...newUris].slice(0, MAX_PHOTOS - existingImageUrls.length));
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 1, // picker 무압축 — 업로드 시 manipulator로 1280px+JPEG80% 처리
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const newUris = result.assets.map((a) => a.uri);
+      setPhotoUris((prev) =>
+        [...prev, ...newUris].slice(0, MAX_PHOTOS - existingImageUrls.length)
+      );
+    } catch {
+      showToast('사진을 불러오지 못했어요. 다시 시도해 주세요');
+    }
+  };
+
+  const openLibrary = async () => {
+    const totalCount = existingImageUrls.length + photoUris.length;
+    if (totalCount >= MAX_PHOTOS) return;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      showPermissionAlert('library');
+      return;
+    }
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_PHOTOS - totalCount,
+        quality: 1, // picker 무압축 — 업로드 시 manipulator로 1280px+JPEG80% 처리
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const newUris = result.assets.map((a) => a.uri);
+      setPhotoUris((prev) =>
+        [...prev, ...newUris].slice(0, MAX_PHOTOS - existingImageUrls.length)
+      );
+    } catch {
+      showToast('사진을 불러오지 못했어요. 다시 시도해 주세요');
+    }
   };
 
   const removeExistingImage = (url: string) => {
@@ -227,20 +313,29 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (currentStep !== 2 || isEditing || toiletLat == null || toiletLng == null) return;
     if (isLocationVerified !== null) return; // 이미 계산됨
+    let cancelled = false;
     (async () => {
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status !== 'granted') {
-          setIsLocationVerified(false);
+          if (!cancelled) setIsLocationVerified(false);
           return;
         }
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        // 5초 타임아웃 — 초과 시 비인증 처리
+        const pos = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 5000)
+          ),
+        ]);
+        if (cancelled) return;
         const dist = getDistanceMeters(pos.coords.latitude, pos.coords.longitude, toiletLat, toiletLng);
-        setIsLocationVerified(dist <= 50);
+        setIsLocationVerified(dist <= VERIFY_DISTANCE_M);
       } catch {
-        setIsLocationVerified(false);
+        if (!cancelled) setIsLocationVerified(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [currentStep, isEditing, toiletLat, toiletLng, isLocationVerified]);
 
   // ─── [다음 단계로] ──────────────────────────────────────────────────────
@@ -249,20 +344,76 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
       setShowErrors(true);
       // 첫 번째 에러 항목으로 스크롤
       requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo({ y: 0, animated: true });
+        scrollRef.current?.scrollToPosition(0, 0, true);
       });
       return;
     }
     setShowErrors(false);
     setCurrentStep(2);
-    scrollRef.current?.scrollTo({ y: 0, animated: false });
+    scrollRef.current?.scrollToPosition(0, 0, false);
   };
 
-  // ─── [이전] ─────────────────────────────────────────────────────────────
-  const goToStep1 = () => {
-    setCurrentStep(1);
-    scrollRef.current?.scrollTo({ y: 0, animated: false });
-  };
+  // ─── 2단계 데이터 초기화 ─────────────────────────────────────────────────
+  const resetStep2 = useCallback(() => {
+    setMoodTags(initialMoodTags ?? []);
+    setMemo(initialComment ?? '');
+    setMemoLastValid(initialComment ?? '');
+    setPhotoUris([]);
+    setExistingImageUrls(initialImageUrls ?? []);
+  }, [initialMoodTags, initialComment, initialImageUrls]);
+
+  // ─── 2단계 → 1단계 이동 (입력 여부 체크) ───────────────────────────────
+  const handleStep2Back = useCallback(() => {
+    if (step2HasInputRef.current) {
+      Alert.alert(
+        '이전 단계로 이동',
+        '이전 단계로 이동하면 추가 정보 입력 내용이 사라져요. 이동할까요?',
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '이동',
+            style: 'destructive',
+            onPress: () => {
+              resetStep2();
+              setCurrentStep(1);
+              scrollRef.current?.scrollToPosition(0, 0, false);
+            },
+          },
+        ]
+      );
+    } else {
+      setCurrentStep(1);
+      scrollRef.current?.scrollToPosition(0, 0, false);
+    }
+  }, [resetStep2]);
+
+  // ─── OS 뒤로가기 / 스와이프 제스처 가드 ─────────────────────────────────
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      // 타임아웃 강제 종료는 가드 없이 통과
+      if (isTimeoutExitRef.current) {
+        isTimeoutExitRef.current = false;
+        return;
+      }
+      if (currentStepRef.current === 2) {
+        e.preventDefault();
+        handleStep2Back();
+        return;
+      }
+      // step 1: 입력이 없으면 그냥 나감
+      if (!step1HasInputRef.current) return;
+      e.preventDefault();
+      Alert.alert(
+        '작성을 그만할까요?',
+        '작성 중인 내용이 사라져요. 나가시겠어요?',
+        [
+          { text: '계속 작성', style: 'cancel' },
+          { text: '나가기', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+        ]
+      );
+    });
+    return unsubscribe;
+  }, [navigation, handleStep2Back]);
 
   // ─── 제출 ───────────────────────────────────────────────────────────────
   const submit = async () => {
@@ -289,7 +440,9 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
     setSubmitting(false);
 
     if (!result.ok) {
-      if (result.reason === 'NOT_LOGGED_IN') {
+      if (result.reason === 'NETWORK_ERROR') {
+        showToast('인터넷 연결을 확인해 주세요');
+      } else if (result.reason === 'NOT_LOGGED_IN') {
         Alert.alert('로그인이 필요해요', '리뷰를 작성하려면 카카오 로그인이 필요해요.', [
           { text: '나중에', style: 'cancel' },
           {
@@ -304,20 +457,23 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
       } else if (result.reason === 'SENSITIVE_TEXT') {
         Alert.alert('작성 불가', result.message, [{ text: '수정할게요' }]);
       } else {
-        Alert.alert('저장 실패', result.message, [{ text: '확인' }]);
+        showToast('리뷰 등록에 실패했어요. 다시 시도해 주세요');
       }
       return;
     }
-    // 사진 일부 또는 전체 업로드 실패 시 토스트로 안내
-    if (result.ok && result.photoFailedCount && result.photoFailedCount > 0) {
-      showToast(`사진 ${result.photoFailedCount}장 업로드에 실패했어요`);
+
+    // 사진 일부 업로드 실패 시 토스트 안내
+    if (result.photoFailedCount && result.photoFailedCount > 0) {
+      showToast('사진 업로드에 실패했어요. 다시 시도해 주세요');
     }
 
-    Alert.alert(
-      isEditing ? '리뷰가 수정됐어요!' : result.isVerified ? '✅ 인증된 리뷰로 등록됐어요!' : '리뷰가 등록됐어요!',
-      isEditing ? '리뷰가 수정됐습니다.' : result.isVerified ? '현재 위치가 화장실 50m 이내로 확인됐어요.' : '리뷰가 저장됐습니다.',
-      [{ text: '확인', onPress: () => navigation.goBack() }]
-    );
+    const successMsg = isEditing
+      ? '리뷰가 수정됐어요!'
+      : result.isVerified
+        ? '✅ 인증된 리뷰로 등록됐어요!'
+        : '리뷰가 등록됐어요!';
+    showToast(successMsg);
+    navigation.goBack();
   };
 
   // ─── 별 부분 채움 렌더 ──────────────────────────────────────────────────
@@ -326,10 +482,16 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
     const fillRatio = Math.max(0, Math.min(1, r - (value - 1))); // 0 ~ 1
     return (
       <View key={value} style={styles.starWrap}>
-        <Text style={[styles.star, styles.starBase]}>★</Text>
+        <Text style={[styles.star, styles.starBase]} allowFontScaling={false} numberOfLines={1}>✿</Text>
         {fillRatio > 0 && (
-          <View style={[styles.starFillClip, { width: STAR_SIZE * fillRatio }]}>
-            <Text style={[styles.star, styles.starFill]}>★</Text>
+          <View style={[styles.starFillClip, { width: STAR_GLYPH_W * fillRatio }]}>
+            <Text
+              style={[styles.star, styles.starFill, styles.starFillText]}
+              allowFontScaling={false}
+              numberOfLines={1}
+            >
+              ✿
+            </Text>
           </View>
         )}
         <TouchableOpacity
@@ -347,14 +509,11 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={styles.container}>
       <ScreenHeader
         title={toiletName ? `${toiletName}` : '리뷰 작성'}
         subtitle={isEditing ? '리뷰 수정' : '화슐랭 평가 등록'}
-        onBack={() => navigation.goBack()}
+        onBack={() => currentStep === 2 ? handleStep2Back() : navigation.goBack()}
       />
 
       {/* ─── 스텝 인디케이터 ─── */}
@@ -412,17 +571,21 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
         </View>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         ref={scrollRef}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        onScrollBeginDrag={Keyboard.dismiss}
+        keyboardDismissMode="on-drag"
+        enableOnAndroid
+        extraScrollHeight={20}
       >
         {currentStep === 1 ? (
           <>
             {/* ─── 1-1. 별점 ─── */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>별점</Text>
+              <Text style={styles.sectionTitle}>
+                별점 <Text style={styles.requiredTag}>(필수)</Text>
+              </Text>
               <View style={styles.starRow}>
                 <TouchableOpacity
                   style={[styles.stepBtn, !canDecrement && styles.stepBtnDisabled]}
@@ -450,6 +613,9 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
                 {rating != null ? rating.toFixed(1) : '점수를 선택해 주세요'}
               </Text>
               {rating != null && <Text style={styles.scoreLabel}>{scoreLabel(rating)}</Text>}
+              {rating == null && (
+                <Text style={styles.starHelper}>0.5점 단위로 점수를 줄 수 있어요</Text>
+              )}
               {showErrors && errors.rating && (
                 <Text style={styles.errorText}>별점을 선택해 주세요</Text>
               )}
@@ -457,7 +623,9 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
 
             {/* ─── 1-2. 청결 상태 ─── */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>청결 상태</Text>
+              <Text style={styles.sectionTitle}>
+                청결 상태 <Text style={styles.requiredTag}>(필수)</Text>
+              </Text>
               <View style={styles.cardRow}>
                 {CLEANLINESS_CARDS.map((c) => {
                   const active = cleanlinessLevel === c.key;
@@ -494,7 +662,9 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
 
             {/* ─── 1-3. 시설 상태 ─── */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>시설 상태</Text>
+              <Text style={styles.sectionTitle}>
+                시설 상태 <Text style={styles.requiredTag}>(필수)</Text>
+              </Text>
               <View style={styles.facilityGrid}>
                 {FACILITY_ITEMS.map((item) => {
                   const val = facility[item.key];
@@ -536,6 +706,29 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
           </>
         ) : (
           <>
+            {/* ─── 2단계 안내 ─── */}
+            <Text style={styles.step2Notice}>
+              모두 선택 사항이에요. 건너뛰어도 등록할 수 있어요.
+            </Text>
+
+            {/* ─── GPS 인증 배너 (상단으로 이동) ─── */}
+            {!isEditing && isLocationVerified === true && (
+              <View style={styles.gpsBanner}>
+                <Text style={styles.gpsBannerIcon}>📍</Text>
+                <Text style={styles.gpsBannerText}>
+                  현재 위치 인증됨 — 현장 인증 뱃지가 붙어요
+                </Text>
+              </View>
+            )}
+            {!isEditing && isLocationVerified === false && (
+              <View style={[styles.gpsBanner, styles.gpsBannerDim]}>
+                <Text style={styles.gpsBannerIcon}>ℹ️</Text>
+                <Text style={[styles.gpsBannerText, styles.gpsBannerTextDim]}>
+                  현재 위치가 화장실 {VERIFY_DISTANCE_M}m 밖이에요. 비인증 리뷰로 저장돼요.
+                </Text>
+              </View>
+            )}
+
             {/* ─── 2-1. 분위기 태그 ─── */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>분위기 태그 (선택)</Text>
@@ -564,14 +757,17 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
               <TextInput
                 value={memo}
                 onChangeText={handleMemoChange}
-                placeholder="특이사항을 남겨주세요 (비밀번호·번호는 입력할 수 없어요)"
+                placeholder="특이사항이 있다면 알려주세요"
                 placeholderTextColor={colors.textTertiary}
                 multiline
                 maxLength={300}
                 style={styles.memoInput}
                 textAlignVertical="top"
               />
-              <Text style={styles.memoCount}>{memo.length}/300</Text>
+              <View style={styles.memoFooter}>
+                <Text style={styles.memoHelper}>비밀번호·번호는 입력할 수 없어요</Text>
+                <Text style={styles.memoCount}>{memo.length}/300</Text>
+              </View>
             </View>
 
             {/* ─── 2-3. 사진 첨부 ─── */}
@@ -608,26 +804,9 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
               </ScrollView>
             </View>
 
-            {/* ─── 2-4. GPS 인증 배너 ─── */}
-            {!isEditing && isLocationVerified === true && (
-              <View style={styles.gpsBanner}>
-                <Text style={styles.gpsBannerIcon}>📍</Text>
-                <Text style={styles.gpsBannerText}>
-                  현재 위치 인증됨 — 현장 인증 뱃지가 붙어요
-                </Text>
-              </View>
-            )}
-            {!isEditing && isLocationVerified === false && (
-              <View style={[styles.gpsBanner, styles.gpsBannerDim]}>
-                <Text style={styles.gpsBannerIcon}>ℹ️</Text>
-                <Text style={[styles.gpsBannerText, styles.gpsBannerTextDim]}>
-                  현재 위치가 화장실 50m 밖이에요. 비인증 리뷰로 저장돼요.
-                </Text>
-              </View>
-            )}
           </>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ─── 하단 버튼 ─── */}
       <View style={styles.submitRow}>
@@ -643,7 +822,7 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
           <View style={styles.bottomBtnRow}>
             <TouchableOpacity
               style={[styles.secondaryButton]}
-              onPress={goToStep1}
+              onPress={handleStep2Back}
               activeOpacity={0.85}
               disabled={submitting}
             >
@@ -664,7 +843,14 @@ export default function ReviewWriteScreen({ route, navigation }: Props) {
           </View>
         )}
       </View>
-    </KeyboardAvoidingView>
+
+      <PhotoSourceSheet
+        visible={photoSheetOpen}
+        onClose={() => setPhotoSheetOpen(false)}
+        onSelectCamera={openCamera}
+        onSelectLibrary={openLibrary}
+      />
+    </View>
   );
 }
 
@@ -743,6 +929,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: 10,
   },
+  requiredTag: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.brand[500],
+  },
 
   // ─── 별점 ───────────────────────────────────────────────────────────────
   starRow: {
@@ -754,14 +945,20 @@ const styles = StyleSheet.create({
   },
   starsInner: { flexDirection: 'row', gap: 4 },
   starWrap: {
-    width: STAR_SIZE,
+    width: STAR_GLYPH_W,
     height: STAR_SIZE + 4,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   star: { fontSize: STAR_SIZE, lineHeight: STAR_SIZE + 4, includeFontPadding: false } as any,
-  starBase: { color: '#E5E0DA' },
-  starFill: { color: '#F59E0B' },
+  starBase: {
+    color: '#D9CCC8',
+    position: 'absolute',
+    left: 0,
+    top: 0,
+  },
+  starFill: { color: colors.brand[500] },
+  starFillText: {
+    width: STAR_GLYPH_W,
+  },
   starFillClip: {
     position: 'absolute',
     left: 0, top: 0,
@@ -771,15 +968,15 @@ const styles = StyleSheet.create({
   starHalfTap: {
     position: 'absolute',
     top: 0, bottom: 0,
-    width: STAR_SIZE / 2,
+    width: STAR_GLYPH_W / 2,
   },
   stepBtn: {
     width: 38,
     height: 38,
     borderRadius: 19,
     borderWidth: 1.5,
-    borderColor: colors.borderSecondary,
-    backgroundColor: colors.backgroundPrimary,
+    borderColor: colors.brand[500],
+    backgroundColor: colors.brand[50],
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -790,7 +987,7 @@ const styles = StyleSheet.create({
   stepBtnText: {
     fontSize: 22,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.brand[700],
     lineHeight: 24,
     includeFontPadding: false,
   } as any,
@@ -805,9 +1002,24 @@ const styles = StyleSheet.create({
   scoreLabel: {
     textAlign: 'center',
     fontSize: 14,
-    color: colors.textSecondary,
+    color: colors.brand[700],
     marginTop: 3,
     fontWeight: '700',
+  },
+  starHelper: {
+    textAlign: 'center',
+    fontSize: 11,
+    color: colors.textTertiary,
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  step2Notice: {
+    marginTop: 4,
+    marginBottom: 4,
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 
   // ─── 청결 카드 ───────────────────────────────────────────────────────────
@@ -818,7 +1030,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: colors.borderSecondary,
-    backgroundColor: colors.backgroundPrimary,
+    backgroundColor: colors.bg.subtle,
     alignItems: 'center',
     gap: 6,
   },
@@ -881,9 +1093,9 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSecondary,
     backgroundColor: colors.backgroundPrimary,
   },
-  chipOn: { backgroundColor: '#E8F5ED', borderColor: '#059669' },
+  chipOn: { backgroundColor: colors.brand[50], borderColor: colors.brand[500] },
   chipText: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
-  chipTextOn: { color: '#1E7E34', fontWeight: '700' },
+  chipTextOn: { color: colors.brand[700], fontWeight: '700' },
 
   // ─── 메모 ────────────────────────────────────────────────────────────────
   memoInput: {
@@ -897,14 +1109,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textPrimary,
   },
-  memoCount: { fontSize: 11, color: colors.textTertiary, textAlign: 'right', marginTop: 6 },
+  memoFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  memoHelper: { fontSize: 11, color: colors.textTertiary, fontWeight: '500' },
+  memoCount: { fontSize: 11, color: colors.textTertiary, textAlign: 'right' },
 
   // ─── 사진 ────────────────────────────────────────────────────────────────
   photoScroll: { flexDirection: 'row' },
   photoItem: {
-    width: 80,
-    height: 80,
-    borderRadius: 10,
+    width: 96,
+    height: 96,
+    borderRadius: 12,
     marginRight: 8,
     position: 'relative',
     overflow: 'hidden',
@@ -923,9 +1142,9 @@ const styles = StyleSheet.create({
   },
   photoRemoveText: { color: '#fff', fontSize: 14, lineHeight: 16, fontWeight: '700' },
   photoAddBtn: {
-    width: 80,
-    height: 80,
-    borderRadius: 10,
+    width: 96,
+    height: 96,
+    borderRadius: 12,
     borderWidth: 1.5,
     borderColor: colors.borderSecondary,
     borderStyle: 'dashed',
@@ -939,7 +1158,7 @@ const styles = StyleSheet.create({
 
   // ─── GPS 배너 ────────────────────────────────────────────────────────────
   gpsBanner: {
-    marginTop: 18,
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

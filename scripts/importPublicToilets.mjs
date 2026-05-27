@@ -5,14 +5,18 @@ import { createClient } from '@supabase/supabase-js';
 
 const DATASET_URL = 'https://apis.data.go.kr/1741000/public_restroom_info';
 const LOCALDATA_CSV_URL = 'https://file.localdata.go.kr/file/download/public_restroom_info/info';
+const SEOUL_API_BASE = 'http://openapi.seoul.go.kr:8088';
+const SEOUL_SERVICE = 'SearchPublicToiletPOIService';
 const DEFAULT_REGION = '';
 const DEFAULT_LIMIT = 30000;
 const PAGE_SIZE = 100;
+const SEOUL_PAGE_SIZE = 1000;
 
 const env = loadDotEnv('.env.local');
 const args = parseArgs(process.argv.slice(2));
 
 const serviceKey = args.serviceKey ?? env.DATA_GO_KR_API_KEY ?? env.PUBLIC_DATA_API_KEY;
+const seoulApiKey = args.seoulApiKey ?? env.SEOUL_API_KEY;
 const region = args.region ?? env.PUBLIC_TOILET_REGION ?? DEFAULT_REGION;
 const limit = Number(args.limit ?? env.PUBLIC_TOILET_LIMIT ?? DEFAULT_LIMIT);
 const mode = args.mode ?? env.PUBLIC_TOILET_IMPORT_MODE ?? 'sql';
@@ -23,13 +27,28 @@ if (!serviceKey) {
   process.exit(1);
 }
 
+// 전국 공공데이터 API
 const rawRows = await fetchPublicToilets({ serviceKey, region, limit });
-const toilets = normalizeRows(rawRows, limit);
+
+// 서울 열린데이터광장 API (키가 있을 때만 병합)
+let seoulRows = [];
+if (seoulApiKey) {
+  console.log('[Seoul] 서울 공중화장실 데이터 가져오는 중...');
+  seoulRows = await fetchSeoulToilets({ seoulApiKey });
+  console.log(`[Seoul] ${seoulRows.length}개 행 수집 완료`);
+} else {
+  console.warn('[Seoul] SEOUL_API_KEY 없음 — 서울 데이터 건너뜀. .env.local에 SEOUL_API_KEY를 추가하세요.');
+}
+
+const allRawRows = [...rawRows, ...seoulRows];
+const toilets = normalizeRows(allRawRows, limit + seoulRows.length);
 
 if (toilets.length === 0) {
   console.error('가져올 수 있는 공중화장실 데이터가 없습니다. region 값을 바꿔보세요.');
   process.exit(1);
 }
+
+console.log(`전국 API: ${rawRows.length}개, 서울 API: ${seoulRows.length}개 → 정규화 후 총 ${toilets.length}개`);
 
 const places = toilets.map((item) => item.place);
 const toiletRows = toilets.map((item) => item.toilet);
@@ -48,6 +67,64 @@ if (mode === 'supabase') {
   console.log(`SQL 생성 완료: tmp/public-toilets-import.sql`);
   console.log(`미리보기 생성 완료: tmp/public-toilets-preview.json`);
   console.log(`총 ${toilets.length}개 공중화장실 데이터를 준비했습니다. Supabase SQL Editor에서 SQL을 실행하세요.`);
+}
+
+async function fetchSeoulToilets({ seoulApiKey }) {
+  const rows = [];
+  let start = 1;
+
+  while (true) {
+    const end = start + SEOUL_PAGE_SIZE - 1;
+    const url = `${SEOUL_API_BASE}/${seoulApiKey}/json/${SEOUL_SERVICE}/${start}/${end}/`;
+
+    let json;
+    try {
+      const response = await fetch(url);
+      const text = await response.text();
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+      json = JSON.parse(text);
+    } catch (err) {
+      console.warn(`[Seoul] 페이지 ${start}~${end} 조회 실패: ${err.message}`);
+      break;
+    }
+
+    const svc = json[SEOUL_SERVICE];
+    if (!svc || svc.RESULT?.CODE !== 'INFO-000') {
+      const msg = svc?.RESULT?.MESSAGE ?? JSON.stringify(json).slice(0, 200);
+      console.warn(`[Seoul] API 오류: ${msg}`);
+      break;
+    }
+
+    const pageRows = svc.row ?? [];
+    if (pageRows.length === 0) break;
+
+    // 서울 API 필드를 전국 API 필드명으로 매핑
+    for (const r of pageRows) {
+      rows.push({
+        화장실명: r.POI_NM ?? r.FNAME ?? '',
+        소재지도로명주소: r.REFINE_ROADNM_ADDR ?? r.ADRES ?? '',
+        소재지지번주소: r.REFINE_LOTNO_ADDR ?? '',
+        위도: r.REFINE_WGS84_LAT ?? r.Y_WGS84 ?? '',
+        경도: r.REFINE_WGS84_LOGT ?? r.X_WGS84 ?? '',
+        개방시간: r.OPTN_DC ?? r.OPERATION_TIME ?? '',
+        남성용대변기수: r.MALE_STALL_CO ?? '',
+        남성용소변기수: r.MALE_URINAL_CO ?? '',
+        여성용대변기수: r.FEMALE_STALL_CO ?? '',
+        '남성용-장애인용대변기수': r.DSBLTY_MALE_STALL_CO ?? '',
+        '남성용-장애인용소변기수': r.DSBLTY_MALE_URINAL_CO ?? '',
+        '여성용-장애인용대변기수': r.DSBLTY_FEMALE_STALL_CO ?? '',
+        기저귀교환대유무: r.BABY_CANGE_YN ?? '',
+        비상벨설치여부: r.EMRGNCY_BELL_YN ?? '',
+        _source: 'seoul',
+      });
+    }
+
+    const total = Number(svc.list_total_count ?? 0);
+    if (end >= total) break;
+    start += SEOUL_PAGE_SIZE;
+  }
+
+  return rows;
 }
 
 async function fetchPublicToilets({ serviceKey, region, limit }) {
@@ -276,7 +353,12 @@ function buildSql({ places, toilets }) {
     '-- Run this in Supabase SQL Editor.',
     'begin;',
     buildInsertSql('places', ['id', 'name', 'address', 'lat', 'lng', 'source', 'kakao_place_id'], places),
-    buildInsertSql('toilets', ['id', 'place_id', 'type', 'access_type', 'floor', 'gender_type'], toilets),
+    buildInsertSql('toilets', [
+      'id', 'place_id', 'type', 'access_type', 'floor', 'gender_type',
+      'operating_hours', 'is_24hours', 'has_diaper_table', 'disabled_available', 'emergency_bell',
+      'male_stalls', 'male_urinals', 'female_stalls',
+      'disabled_male_stalls', 'disabled_male_urinals', 'disabled_female_stalls',
+    ], toilets),
     'commit;',
     '',
   ].join('\n\n');

@@ -80,6 +80,7 @@ export default function MapScreen() {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const isSearchFocusedRef = useRef(false);
   const initialFetchDoneRef = useRef(false);
+  const isAutoMovingRef = useRef(false);
   const search = useSearch(mapCenter, toilets);
   const isShowingDemoData = hasDemoToilets(toilets);
   const insets = useSafeAreaInsets();
@@ -296,7 +297,11 @@ export default function MapScreen() {
         mapCenterRef.current = nextCenter;
         setMapCenter(nextCenter);
         if (!toiletLoadingRef.current) {
-          setShowResearchButton(shouldShowResearchButton(visibleBoundsRef.current));
+          if (isAutoMovingRef.current) {
+            isAutoMovingRef.current = false;
+          } else {
+            setShowResearchButton(shouldShowResearchButton(visibleBoundsRef.current));
+          }
         }
       }, 600);
     },
@@ -323,11 +328,27 @@ export default function MapScreen() {
     if (!selectedStillVisible) setSelectedToilet(null);
   }, [filteredToilets, selectedToilet]);
 
-  // 급해요 모드 활성화 시 → Top 3 + 내 위치가 모두 보이도록 자동 줌
+  // 급해요 모드 활성화 시 → 내 위치 기준 2km 반경 재조회 (Top 3 확보)
   useEffect(() => {
-    if (!urgentMode || !urgentToilets || urgentToilets.length === 0) return;
+    if (!urgentMode || !location) return;
+    fetchToilets(location.lat, location.lng, 2);
+    // urgentMode 토글 시에만 실행 (location 변경 시 재조회 불필요)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urgentMode]);
+
+  // 급해요 모드 활성화 시 → Top 3 + 내 위치가 모두 보이도록 자동 줌
+  // 단, 모드 진입 직후 1회만. 같은 모드 내 필터 변경 등으로 Top 3가 갱신돼도 지도는 유지.
+  const hasFittedUrgentRef = useRef(false);
+  useEffect(() => {
+    if (!urgentMode) {
+      hasFittedUrgentRef.current = false;
+      return;
+    }
+    if (hasFittedUrgentRef.current) return;
+    if (!urgentToilets || urgentToilets.length === 0) return;
     const points = urgentToilets.map((t) => ({ lat: t.lat, lng: t.lng }));
     if (location) points.push(location);
+    isAutoMovingRef.current = true;
     // Apple Maps 폴백
     if (mapErrorMsg && appleMapRef.current) {
       appleMapRef.current.fitToCoordinates(
@@ -337,6 +358,7 @@ export default function MapScreen() {
     } else {
       kakaoMapRef.current?.fitPoints(points, 0.15);
     }
+    hasFittedUrgentRef.current = true;
   }, [urgentMode, urgentToilets, location, mapErrorMsg]);
 
   const goToMyLocation = () => {
@@ -587,7 +609,7 @@ export default function MapScreen() {
           </View>
           <TouchableOpacity
             style={styles.profileButton}
-            onPress={() => navigation.navigate('마이페이지' as never)}
+            onPress={() => navigation.navigate('MyPage')}
             activeOpacity={0.8}
           >
             <Text style={styles.profileButtonText}>👤</Text>
@@ -625,34 +647,17 @@ export default function MapScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filterRow}
         >
-          {FILTER_OPTIONS.map((filter) => {
+          {FILTER_OPTIONS.filter((f) => f.label !== URGENT_FILTER).map((filter) => {
             const isAll = filter.label === '전체';
             const isStar = filter.label === STAR_FILTER;
-            const isUrgent = filter.label === URGENT_FILTER;
             const isActive = isAll
               ? selectedFilters.length === 0
               : selectedFilters.includes(filter.label);
 
-            const chipStyle = isUrgent
-              ? styles.urgentChip
-              : isStar
-                ? styles.starChip
-                : styles.filterChip;
-            const chipOnStyle = isUrgent
-              ? styles.urgentChipOn
-              : isStar
-                ? styles.starChipOn
-                : styles.filterChipOn;
-            const textStyle = isUrgent
-              ? styles.urgentChipText
-              : isStar
-                ? styles.starChipText
-                : styles.filterChipText;
-            const textOnStyle = isUrgent
-              ? styles.urgentChipTextOn
-              : isStar
-                ? styles.starChipTextOn
-                : styles.filterChipTextOn;
+            const chipStyle = isStar ? styles.starChip : styles.filterChip;
+            const chipOnStyle = isStar ? styles.starChipOn : styles.filterChipOn;
+            const textStyle = isStar ? styles.starChipText : styles.filterChipText;
+            const textOnStyle = isStar ? styles.starChipTextOn : styles.filterChipTextOn;
 
             return (
               <TouchableOpacity
@@ -665,12 +670,10 @@ export default function MapScreen() {
                 onPress={() => {
                   if (!filter.enabled) return;
                   setSelectedFilters((prev) => {
-                    if (isAll) return []; // 전체: 모두 해제
+                    if (isAll) return [];
                     if (prev.includes(filter.label)) {
-                      // 이미 선택된 것 해제
                       return prev.filter((f) => f !== filter.label);
                     }
-                    // 새로 추가
                     return [...prev, filter.label];
                   });
                 }}
@@ -684,7 +687,7 @@ export default function MapScreen() {
                     !filter.enabled && styles.filterChipTextDisabled,
                   ]}
                 >
-                  {isStar ? '★ 별점' : filter.label}
+                  {isStar ? '✿ 별점' : filter.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -731,6 +734,30 @@ export default function MapScreen() {
 
       )}
 
+      {/* 급해요 플로팅 버튼 (지도 좌측 상단) */}
+      {!loading && (
+        <TouchableOpacity
+          style={[
+            styles.urgentFloatBtn,
+            { top: countBadgeTop - 2 },
+            urgentMode && styles.urgentFloatBtnOn,
+          ]}
+          onPress={() =>
+            setSelectedFilters((prev) =>
+              prev.includes(URGENT_FILTER)
+                ? prev.filter((f) => f !== URGENT_FILTER)
+                : [...prev, URGENT_FILTER]
+            )
+          }
+          activeOpacity={0.82}
+        >
+          <Text style={styles.urgentFloatBtnEmoji}>🚨</Text>
+          <Text style={[styles.urgentFloatBtnLabel, urgentMode && styles.urgentFloatBtnLabelOn]}>
+            급해요
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {/* 화장실 수 표시 배지 */}
       {!loading && (
         <View
@@ -750,7 +777,7 @@ export default function MapScreen() {
         </View>
       )}
 
-      {!loading && showResearchButton && !searchDropdownOpen && (
+      {!loading && showResearchButton && !urgentMode && !searchDropdownOpen && (
         <TouchableOpacity
           style={[styles.researchButton, { top: countBadgeTop + 54 }]}
           onPress={researchCurrentRegion}
@@ -953,22 +980,36 @@ const styles = StyleSheet.create({
   starChipText: { fontSize: 13, color: colors.orange, fontWeight: '800' },
   starChipOn: { backgroundColor: colors.amber, borderColor: colors.amber },
   starChipTextOn: { color: '#fff' },
-  urgentChip: {
-    height: 36,
-    paddingHorizontal: 14,
-    borderRadius: 18,
+  urgentFloatBtn: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 20,
     borderWidth: 1.5,
     borderColor: '#E50914',
-    backgroundColor: '#FFF0F0',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#fff',
+    shadowColor: '#E50914',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 5,
   },
-  urgentChipOn: {
+  urgentFloatBtnOn: {
     backgroundColor: '#E50914',
     borderColor: '#E50914',
   },
-  urgentChipText: { fontSize: 13, color: '#E50914', fontWeight: '800' },
-  urgentChipTextOn: { color: '#fff' },
+  urgentFloatBtnEmoji: { fontSize: 14, lineHeight: 18 },
+  urgentFloatBtnLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#E50914',
+  },
+  urgentFloatBtnLabelOn: { color: '#fff' },
   loadingOverlay: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,

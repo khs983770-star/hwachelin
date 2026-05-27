@@ -1,6 +1,6 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../constants/theme';
+import { colors, shadow } from '../constants/theme';
 
 interface Props {
   title: string;
@@ -18,10 +18,12 @@ export default function ScreenHeader({ title, subtitle, onBack, headerRight }: P
         <TouchableOpacity
           style={styles.backBtn}
           onPress={onBack}
-          activeOpacity={0.5}
+          activeOpacity={0.7}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={styles.backIcon}>{'‹'}</Text>
+          <View style={styles.backCircle}>
+            <Text style={styles.backIcon}>{'‹'}</Text>
+          </View>
         </TouchableOpacity>
 
         <View style={styles.titleWrap}>
@@ -51,7 +53,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 48,
-    paddingHorizontal: 4,
+    paddingHorizontal: 12,
     paddingVertical: 4,
   },
   backBtn: {
@@ -60,11 +62,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  backCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.bg.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border.default,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.sm,
+  },
   backIcon: {
-    fontSize: 36,
-    fontWeight: '200',
-    color: colors.textPrimary,
-    lineHeight: 40,
+    fontSize: 26,
+    fontWeight: '700',
+    color: colors.text.primary,
+    lineHeight: 28,
+    marginLeft: -2,
     includeFontPadding: false,
   } as any,
   titleWrap: {

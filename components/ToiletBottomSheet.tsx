@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   Animated,
   Alert,
@@ -16,7 +17,6 @@ import { colors } from '../constants/theme';
 import { getDistanceMeters } from '../lib/searchService';
 import { checkIsBookmarked, toggleBookmark } from '../lib/bookmarkService';
 import { requireLogin } from '../lib/authService';
-import MarkerPinIcon from './MarkerPinIcon';
 import HwachelinStars from './HwachelinStars';
 import { showToast } from './Toast';
 
@@ -161,18 +161,18 @@ export default function ToiletBottomSheet({ toilet, onClose, onDetailPress, onRe
 
   const typeColor = toilet?.type === '공공' ? colors.blue : colors.orange;
 
-  const ratingText =
-    toilet?.avg_rating != null ? `⭐ ${toilet.avg_rating.toFixed(1)}` : '리뷰 없음';
-
-  const reviewText =
+  const reviewCountText =
     toilet?.review_count != null && toilet.review_count > 0
-      ? `(${toilet.review_count}개)`
+      ? `(${toilet.review_count})`
       : '';
   const distanceText = (() => {
     if (!userLocation || !toilet) return null;
     const d = getDistanceMeters(userLocation.lat, userLocation.lng, toilet.lat, toilet.lng);
     return d >= 1000 ? `${(d / 1000).toFixed(1)}km` : `${Math.round(d)}m`;
   })();
+
+  const hasFacility =
+    !!toilet?.disabled_available || !!toilet?.has_diaper_table || !!toilet?.emergency_bell;
 
   return (
     <>
@@ -190,7 +190,11 @@ export default function ToiletBottomSheet({ toilet, onClose, onDetailPress, onRe
 
         <View style={styles.header}>
           <View style={styles.scorePill}>
-            <MarkerPinIcon size={38} />
+            <Image
+              source={require('../assets/marker-pin.png')}
+              style={styles.markerPinImage}
+              resizeMode="contain"
+            />
           </View>
           <View style={styles.headerLeft}>
             <Text style={styles.name} numberOfLines={1}>
@@ -198,13 +202,22 @@ export default function ToiletBottomSheet({ toilet, onClose, onDetailPress, onRe
             </Text>
             <View style={styles.metaRow}>
               {toilet?.avg_rating != null ? (
-                <HwachelinStars rating={toilet.avg_rating} size={13} gap={1} />
+                <>
+                  <HwachelinStars rating={toilet.avg_rating} size={13} gap={1} />
+                  <Text style={styles.metaStrong}>{toilet.avg_rating.toFixed(1)}</Text>
+                  {reviewCountText ? (
+                    <Text style={styles.metaText}>{reviewCountText}</Text>
+                  ) : null}
+                </>
               ) : (
-                <Text style={styles.stars}>리뷰 없음</Text>
+                <Text style={styles.metaText}>첫 리뷰 대기</Text>
               )}
-              <Text style={styles.metaText}>
-                {reviewText || '첫 리뷰 대기'}
-              </Text>
+              {distanceText ? (
+                <>
+                  <Text style={styles.metaDot}>·</Text>
+                  <Text style={styles.metaStrong}>{distanceText}</Text>
+                </>
+              ) : null}
             </View>
           </View>
           <View style={styles.headerRight}>
@@ -225,7 +238,7 @@ export default function ToiletBottomSheet({ toilet, onClose, onDetailPress, onRe
           </View>
         </View>
 
-        <Text style={styles.address} numberOfLines={2}>
+        <Text style={styles.address} numberOfLines={1}>
           {toilet?.address ?? '주소 정보 없음'}
         </Text>
 
@@ -233,13 +246,6 @@ export default function ToiletBottomSheet({ toilet, onClose, onDetailPress, onRe
           <View style={[styles.tagFill, { backgroundColor: typeColor }]}>
             <Text style={styles.tagFillText}>{toilet?.type}</Text>
           </View>
-          {toilet?.gender_type != null && (
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>
-                {toilet.gender_type === '공용' ? '⚥ 공용' : '⚤ 남녀분리'}
-              </Text>
-            </View>
-          )}
           {toilet?.access_type != null && (
             <View style={styles.tag}>
               <Text style={styles.tagText}>
@@ -247,30 +253,25 @@ export default function ToiletBottomSheet({ toilet, onClose, onDetailPress, onRe
               </Text>
             </View>
           )}
-          <View style={styles.tag}>
-            <Text style={styles.tagText}>{ratingText}</Text>
-          </View>
-          {distanceText != null && (
+          {toilet?.gender_type != null && (
             <View style={styles.tag}>
-              <Text style={styles.tagText}>📍 {distanceText}</Text>
-            </View>
-          )}
-          {toilet?.disabled_available && (
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>♿ 장애인</Text>
-            </View>
-          )}
-          {toilet?.has_diaper_table && (
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>🍼 기저귀교환대</Text>
-            </View>
-          )}
-          {toilet?.emergency_bell && (
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>🔔 비상벨</Text>
+              <Text style={styles.tagText}>
+                {toilet.gender_type === '공용' ? '공용' : '남녀분리'}
+              </Text>
             </View>
           )}
         </View>
+
+        {hasFacility && (
+          <Text style={styles.facilityRow} numberOfLines={1}>
+            {toilet?.disabled_available ? '♿ 장애인' : ''}
+            {toilet?.disabled_available && toilet?.has_diaper_table ? '  ·  ' : ''}
+            {toilet?.has_diaper_table ? '🍼 기저귀' : ''}
+            {(toilet?.disabled_available || toilet?.has_diaper_table) && toilet?.emergency_bell ? '  ·  ' : ''}
+            {toilet?.emergency_bell ? '🔔 비상벨' : ''}
+          </Text>
+        )}
+
         {toilet?.operating_hours != null && toilet.operating_hours !== '' && (
           <Text style={styles.hoursText} numberOfLines={1}>
             🕐 {toilet.operating_hours}
@@ -342,20 +343,23 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   scorePill: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
-    backgroundColor: '#FFF0E9',
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
-    overflow: 'hidden',
+    marginRight: 10,
+  },
+  markerPinImage: {
+    width: 44,
+    height: 44,
   },
   headerLeft: { flex: 1, marginRight: 8 },
-  name: { fontSize: 18, fontWeight: '900', color: colors.textPrimary, marginBottom: 4 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  name: { fontSize: 18, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   stars: { fontSize: 12, color: colors.amber },
   metaText: { fontSize: 12, color: colors.textSecondary },
+  metaStrong: { fontSize: 12, color: colors.textPrimary, fontWeight: '700', marginLeft: 2 },
+  metaDot: { fontSize: 12, color: colors.textTertiary, marginHorizontal: 2 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   bookmarkBtn: {
     width: 30,
@@ -381,19 +385,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF4F6',
   },
   closeText: { fontSize: 16, color: colors.orange, fontWeight: '900' },
-  address: { fontSize: 12, color: colors.textSecondary, marginBottom: 9, lineHeight: 18 },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 7 },
-  tagFill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  tagFillText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  address: { fontSize: 12, color: colors.textSecondary, marginBottom: 10, lineHeight: 18 },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  tagFill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8 },
+  tagFillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   tag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderTertiary,
     backgroundColor: colors.backgroundPrimary,
   },
-  tagText: { fontSize: 11, color: colors.textSecondary, fontWeight: '500' },
+  tagText: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+  facilityRow: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
   hoursText: {
     fontSize: 11,
     color: colors.textTertiary,

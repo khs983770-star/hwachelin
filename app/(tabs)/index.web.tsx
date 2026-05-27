@@ -15,7 +15,7 @@ import { ToiletMarkerData } from '../../types/toilet';
 import { RootStackParamList } from '../../types/navigation';
 import { colors } from '../../constants/theme';
 
-const FILTERS = ['전체', '24시간', '비데', '개방형', '기저귀', '남녀분리', '★ 별점'];
+const FILTERS = ['전체', '24시간', '비데', '개방형', '기저귀', '남녀분리', '✿ 별점'];
 
 const markerPositions: ViewStyle[] = [
   { left: '44%', top: '47%' },
@@ -46,7 +46,7 @@ export default function WebMapScreen() {
     const query = searchQuery.trim();
     return toilets.filter((toilet) => {
       if (query && !`${toilet.name} ${toilet.address}`.includes(query)) return false;
-      if (selectedFilter === '★ 별점') return (toilet.avg_rating ?? 0) >= 4.2;
+      if (selectedFilter === '✿ 별점') return (toilet.avg_rating ?? 0) >= 4.2;
       if (selectedFilter === '개방형') return toilet.access_type === '누구나';
       if (selectedFilter === '남녀분리') return toilet.gender_type === '남녀분리';
       return true;
@@ -132,18 +132,18 @@ export default function WebMapScreen() {
             <TouchableOpacity
               key={filter}
               style={[
-                filter === '★ 별점' ? styles.starChip : styles.filterChip,
+                filter === '✿ 별점' ? styles.starChip : styles.filterChip,
                 selectedFilter === filter &&
-                  (filter === '★ 별점' ? styles.starChipOn : styles.filterChipOn),
+                  (filter === '✿ 별점' ? styles.starChipOn : styles.filterChipOn),
               ]}
               onPress={() => setSelectedFilter(filter)}
               activeOpacity={0.8}
             >
               <Text
                 style={[
-                  filter === '★ 별점' ? styles.starChipText : styles.filterChipText,
+                  filter === '✿ 별점' ? styles.starChipText : styles.filterChipText,
                   selectedFilter === filter &&
-                    (filter === '★ 별점' ? styles.starChipTextOn : styles.filterChipTextOn),
+                    (filter === '✿ 별점' ? styles.starChipTextOn : styles.filterChipTextOn),
                 ]}
               >
                 {filter}
@@ -169,7 +169,7 @@ export default function WebMapScreen() {
                 {activeToilet.name}
               </Text>
               <Text style={styles.sheetMeta}>
-                ★★★★★ · 리뷰 {activeToilet.review_count ?? 0}개
+                ✿✿✿✿✿ · 리뷰 {activeToilet.review_count ?? 0}개
               </Text>
             </View>
             <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedToilet(null)}>

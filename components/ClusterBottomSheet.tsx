@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,7 +13,6 @@ import {
 import { colors } from '../constants/theme';
 import { getDistanceMeters } from '../lib/searchService';
 import { ToiletMarkerData } from '../types/toilet';
-import MarkerPinIcon from './MarkerPinIcon';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MAX_SHEET_HEIGHT = Math.min(430, SCREEN_HEIGHT * 0.56);
@@ -141,7 +141,11 @@ export default function ClusterBottomSheet({
                 activeOpacity={0.84}
               >
                 <View style={styles.scoreBox}>
-                  <MarkerPinIcon size={28} />
+                  <Image
+                    source={require('../assets/marker-pin.png')}
+                    style={styles.markerPinImage}
+                    resizeMode="contain"
+                  />
                 </View>
                 <View style={styles.rowMain}>
                   <View style={styles.nameRow}>
@@ -157,7 +161,7 @@ export default function ClusterBottomSheet({
                   </Text>
                   <View style={styles.metaRow}>
                     <Text style={styles.meta}>{toilet.type}</Text>
-                    <Text style={styles.meta}>★ {ratingText}</Text>
+                    <Text style={styles.meta}>✿ {ratingText}</Text>
                     <Text style={styles.meta}>{reviewText}</Text>
                   </View>
                 </View>
@@ -238,13 +242,14 @@ const styles = StyleSheet.create({
     borderTopColor: colors.borderTertiary,
   },
   scoreBox: {
-    width: 44,
+    width: 42,
     height: 48,
-    borderRadius: 14,
-    backgroundColor: '#FFF0E9',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
+  },
+  markerPinImage: {
+    width: 42,
+    height: 42,
   },
   rowMain: { flex: 1, minWidth: 0 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

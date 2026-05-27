@@ -263,7 +263,7 @@ export function SearchSuggestionList({
               {(place.hasToiletData || place.avgRating || place.reviewCount) && (
                 <Text style={styles.resultStats} numberOfLines={1}>
                   {place.hasToiletData ? '화장실 정보 있음' : ''}
-                  {place.avgRating ? ` · ★ ${place.avgRating.toFixed(1)}` : ''}
+                  {place.avgRating ? ` · ✿ ${place.avgRating.toFixed(1)}` : ''}
                   {place.reviewCount ? ` · 리뷰 ${place.reviewCount}` : ''}
                 </Text>
               )}
